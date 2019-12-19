@@ -9,9 +9,9 @@ use nom::{
     combinator::{cut, flat_map, map, map_res, opt, recognize, value, verify},
     do_parse,
     error::ParseError,
-    multi::separated_nonempty_list,
+    multi::{many0, many1, separated_nonempty_list},
     named,
-    sequence::{delimited, separated_pair, terminated, tuple},
+    sequence::{delimited, preceded, separated_pair, terminated, tuple},
     IResult,
 };
 
@@ -55,10 +55,15 @@ pub struct ConstDecl {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+pub enum StructMember {
+    FieldDecl(FieldDecl),
+    ConstDecl(ConstDecl),
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub struct StructDecl {
     pub name: String,
-    pub fields: Vec<FieldDecl>,
-    pub constnats: Vec<ConstDecl>,
+    pub members: Vec<StructMember>,
 }
 
 /// Match a comma, optionally surrounded by spaces
@@ -335,6 +340,83 @@ pub fn const_decl(input: &str) -> IResult<&str, Vec<ConstDecl>> {
                 ty,
             })
             .collect(),
+    ))
+}
+
+pub fn struct_member(input: &str) -> IResult<&str, Vec<StructMember>> {
+    alt((
+        map(field_decl, |fd| vec![StructMember::FieldDecl(fd)]),
+        map(const_decl, |cds| {
+            cds.into_iter().map(StructMember::ConstDecl).collect()
+        }),
+    ))(input)
+}
+
+/// Parse a whole struct declaration.
+///
+/// ```
+/// # use nom::{Err, error::ErrorKind, Needed};
+/// use rust_lcm_codegen::parser::{struct_decl, StructDecl, ConstDecl, ConstValue, PrimitiveType, StructMember, FieldDecl};
+///
+/// assert_eq!(
+///     struct_decl("struct my_struct {\n  const int32_t YELLOW=1;\n  int32_t color;\n}"),
+///     Ok((
+///         "",
+///         StructDecl {
+///           name: "my_struct".to_string(),
+///           members: vec![
+///             StructMember::ConstDecl(
+///               ConstDecl {
+///                 name: "YELLOW".to_owned(),
+///                 ty: PrimitiveType::Int32,
+///                 value: ConstValue::Int32(1)
+///               }
+///             ),
+///             StructMember::FieldDecl(
+///               FieldDecl {
+///                 name: "color".to_owned(),
+///                 ty: PrimitiveType::Int32,
+///               }
+///             ),
+///           ]
+///         }
+///     ))
+/// );
+///
+/// assert_eq!(
+///     struct_decl("struct empty_struct { }"),
+///     Ok((
+///         "",
+///         StructDecl {
+///           name: "empty_struct".to_string(),
+///           members: vec![],
+///         }
+///     ))
+/// );
+///
+///
+/// ```
+pub fn struct_decl(input: &str) -> IResult<&str, StructDecl> {
+    let (input, _) = tuple((tag("struct"), space1))(input)?;
+    let (input, name) = field_name(input)?; // TODO change field_name to something more general
+    let (input, _) = tuple((multispace1, tag("{"), multispace1))(input)?;
+
+    let (input, member_vecs) =
+        many0(terminated(struct_member, tuple((space0, tag(";"), multispace0))))(input)?;
+
+    let (input, _) = tag("}")(input)?;
+
+    let mut members = vec![];
+    for mv in member_vecs.into_iter() {
+        members.extend(mv);
+    }
+
+    Ok((
+        input,
+        StructDecl {
+            name: name.to_owned(),
+            members,
+        },
     ))
 }
 
