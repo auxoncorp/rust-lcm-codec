@@ -281,10 +281,7 @@ pub fn const_value(ty: PrimitiveType, input: &str) -> IResult<&str, ConstValue> 
             |s: &str| ConstValue::Double(s.to_owned()),
         )(input),
         PrimitiveType::String => panic!("String constants are not supported"),
-        PrimitiveType::Boolean => alt((
-            map(tag("true"), |_| ConstValue::Boolean(true)),
-            map(tag("false"), |_| ConstValue::Boolean(false)),
-        ))(input),
+        PrimitiveType::Boolean => panic!("Boolean constants are not supported"),
         PrimitiveType::Byte => {
             map(map_res(digit1, |s: &str| s.parse::<u8>()), ConstValue::Byte)(input)
         }
