@@ -34,7 +34,7 @@ pub enum ConstValue {
     Int16(i16),
     Int32(i32),
     Int64(i64),
-    // Keep floats and doubles as strings, since we f32/f64 don't have Eq defined on them
+    // Keep floats and doubles as strings, since f32/f64 don't have Eq defined on them
     Float(String),
     Double(String),
     Boolean(bool),
@@ -64,6 +64,17 @@ pub enum StructMember {
 pub struct Struct {
     pub name: String,
     pub members: Vec<StructMember>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct Package {
+    pub name: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct Schema {
+    pub package: Option<Package>,
+    pub structs: Vec<Struct>,
 }
 
 /// Match a comma, optionally surrounded by spaces
@@ -394,8 +405,10 @@ pub fn struct_decl(input: &str) -> IResult<&str, Struct> {
     let (input, name) = field_name(input)?; // TODO change field_name to something more general
     let (input, _) = tuple((multispace1, tag("{"), multispace1))(input)?;
 
-    let (input, member_vecs) =
-        many0(terminated(struct_member, tuple((space0, tag(";"), multispace0))))(input)?;
+    let (input, member_vecs) = many0(terminated(
+        struct_member,
+        tuple((space0, tag(";"), multispace0)),
+    ))(input)?;
 
     let (input, _) = tag("}")(input)?;
 
@@ -413,3 +426,80 @@ pub fn struct_decl(input: &str) -> IResult<&str, Struct> {
     ))
 }
 
+/// Parse a package line, not including the semicolon.
+///
+/// ```
+/// # use nom::{Err, error::ErrorKind, Needed};
+/// use rust_lcm_codegen::parser::{package_decl, Package};
+///
+/// assert_eq!(
+///     package_decl("package my_package"),
+///     Ok((
+///         "",
+///         Package {
+///           name: "my_package".to_string(),
+///         }
+///     ))
+/// );
+/// ```
+pub fn package_decl(input: &str) -> IResult<&str, Package> {
+    map(
+        preceded(tuple((tag("package"), space1)), field_name),
+        |name: &str| Package {
+            name: name.to_string(),
+        },
+    )(input)
+}
+
+/// Parse an entire schema file
+/// ```
+/// # use nom::{Err, error::ErrorKind, Needed};
+/// use rust_lcm_codegen::parser::{schema, Package, Schema, Struct, Const, ConstValue, PrimitiveType, StructMember, Field};
+///
+/// assert_eq!(
+///     schema("package test;\n\nstruct empty { }\nstruct empty2 { }"),
+///     Ok((
+///         "",
+///         Schema {
+///           package: Some(Package { name: "test".to_string() }),
+///           structs: vec![
+///             Struct {
+///               name: "empty".to_string(),
+///               members: vec![],
+///             },
+///             Struct {
+///               name: "empty2".to_string(),
+///               members: vec![],
+///             }
+///           ]
+///         },
+///     ))
+/// );
+///
+///  assert_eq!(
+///     schema("struct empty { }"),
+///     Ok((
+///         "",
+///         Schema {
+///           package: None,
+///           structs: vec![
+///             Struct {
+///               name: "empty".to_string(),
+///               members: vec![],
+///             }
+///           ]
+///         },
+///     ))
+/// );
+/// ```
+pub fn schema(input: &str) -> IResult<&str, Schema> {
+    let (input, _) = multispace0(input)?;
+    let (input, package) = opt(terminated(
+        package_decl,
+        tuple((space0, tag(";"), multispace0)),
+    ))(input)?;
+
+    let (input, structs) = many0(terminated(struct_decl, multispace0))(input)?;
+
+    Ok((input, Schema { package, structs }))
+}
