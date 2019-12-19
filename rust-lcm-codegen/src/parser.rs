@@ -3,8 +3,8 @@
 
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_while, take_while1},
-    character::complete::{alpha1, digit0, digit1, multispace0, multispace1, space0, space1},
+    bytes::complete::{tag, take_while, take_while1, tag_no_case},
+    character::complete::{alpha1, digit0, digit1, multispace0, multispace1, space0, space1, hex_digit1, oct_digit1},
     character::is_alphanumeric,
     combinator::{cut, flat_map, map, map_res, opt, recognize, value, verify},
     do_parse,
@@ -170,9 +170,26 @@ pub fn field_decl(input: &str) -> IResult<&str, Field> {
     )(input)
 }
 
-/// Recognize something that looks like an integer, positive or negative. Keep it a string.
-fn recognize_int(input: &str) -> IResult<&str, &str> {
-    recognize(tuple((opt(tag("-")), digit1)))(input)
+/// Recognize something that looks like an integer, positive or negative. Return a tuple of the
+/// content part of the string and the radix.
+fn recognize_int(input: &str) -> IResult<&str, (String, u32)> {
+    let (input, minus) = opt(tag("-"))(input)?;
+    let minus = minus.unwrap_or("");
+
+    let (input, radix) = alt((
+        value(16, tag_no_case("0x")),
+        value(8, tag("0")),
+        value(10, tag(""))
+    ))(input)?;
+
+    let (input, body) = match radix {
+        16 => hex_digit1(input)?,
+        10 => digit1(input)?,
+        8 => oct_digit1(input)?,
+        _ => unreachable!(),
+    };
+
+    Ok((input, (format!("{}{}", minus, body), radix)))
 }
 
 /// Recognize something that looks like an float, positive or negative. Keep it a string.
@@ -190,9 +207,13 @@ fn recognize_float(input: &str) -> IResult<&str, &str> {
 /// # use nom::{Err, error::ErrorKind, Needed};
 /// use rust_lcm_codegen::parser::{const_value, ConstValue, PrimitiveType};
 ///
-/// assert_eq!(const_value(PrimitiveType::Int8,  "42"), Ok(("", ConstValue::Int8( 42))));
-/// assert_eq!(const_value(PrimitiveType::Int8, "-42"), Ok(("", ConstValue::Int8(-42))));
-/// assert_eq!(const_value(PrimitiveType::Int8, "1024"),
+/// assert_eq!(const_value(PrimitiveType::Int8,    "42"), Ok(("", ConstValue::Int8(   42))));
+/// assert_eq!(const_value(PrimitiveType::Int8,   "-42"), Ok(("", ConstValue::Int8(  -42))));
+/// assert_eq!(const_value(PrimitiveType::Int8,  "0x2f"), Ok(("", ConstValue::Int8( 0x2f))));
+/// assert_eq!(const_value(PrimitiveType::Int8, "-0x2f"), Ok(("", ConstValue::Int8(-0x2f))));
+/// assert_eq!(const_value(PrimitiveType::Int8,   "022"), Ok(("", ConstValue::Int8( 0o22))));
+/// assert_eq!(const_value(PrimitiveType::Int8,  "-022"), Ok(("", ConstValue::Int8(-0o22))));
+/// assert_eq!(const_value(PrimitiveType::Int8,  "1024"),
 ///            Err(Err::Error(("1024", ErrorKind::MapRes))));
 ///
 /// assert_eq!(const_value(PrimitiveType::Int16,  "1024"), Ok(("", ConstValue::Int16( 1024))));
@@ -228,11 +249,6 @@ fn recognize_float(input: &str) -> IResult<&str, &str> {
 /// assert_eq!(const_value(PrimitiveType::Double, "asdf"),
 ///            Err(Err::Error(("asdf", ErrorKind::Digit))));
 ///
-/// assert_eq!(const_value(PrimitiveType::Boolean, "true"), Ok(("", ConstValue::Boolean(true))));
-/// assert_eq!(const_value(PrimitiveType::Boolean, "false"), Ok(("", ConstValue::Boolean(false))));
-/// assert_eq!(const_value(PrimitiveType::Boolean, "bogus"),
-///            Err(Err::Error(("bogus", ErrorKind::Tag))));
-///
 /// assert_eq!(const_value(PrimitiveType::Byte,   "42"), Ok(("", ConstValue::Byte( 42))));
 /// assert_eq!(const_value(PrimitiveType::Byte,  "-42"), Err(Err::Error(("-42", ErrorKind::Digit))));
 /// assert_eq!(const_value(PrimitiveType::Byte, "1024"), Err(Err::Error(("1024", ErrorKind::MapRes))));
@@ -241,19 +257,19 @@ fn recognize_float(input: &str) -> IResult<&str, &str> {
 pub fn const_value(ty: PrimitiveType, input: &str) -> IResult<&str, ConstValue> {
     match ty {
         PrimitiveType::Int8 => map(
-            map_res(recognize_int, |s: &str| s.parse::<i8>()),
+            map_res(recognize_int, |(s, radix)| i8::from_str_radix(&s, radix)),
             ConstValue::Int8,
         )(input),
         PrimitiveType::Int16 => map(
-            map_res(recognize_int, |s: &str| s.parse::<i16>()),
+            map_res(recognize_int, |(s, radix)| i16::from_str_radix(&s, radix)),
             ConstValue::Int16,
         )(input),
         PrimitiveType::Int32 => map(
-            map_res(recognize_int, |s: &str| s.parse::<i32>()),
+            map_res(recognize_int, |(s, radix)| i32::from_str_radix(&s, radix)),
             ConstValue::Int32,
         )(input),
         PrimitiveType::Int64 => map(
-            map_res(recognize_int, |s: &str| s.parse::<i64>()),
+            map_res(recognize_int, |(s, radix)| i64::from_str_radix(&s, radix)),
             ConstValue::Int64,
         )(input),
         PrimitiveType::Float => map(
