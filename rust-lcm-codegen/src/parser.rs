@@ -71,11 +71,10 @@ pub struct StructDecl {
 /// ```
 /// # use nom::{Err, error::ErrorKind, Needed};
 /// use rust_lcm_codegen::parser::spaced_comma;
-/// let parser = spaced_comma;
 ///
-/// assert_eq!(parser(","), Ok(("", ",")));
-/// assert_eq!(parser(" ,\t"), Ok(("", " ,\t")));
-/// assert_eq!(parser("x"), Err(Err::Error(("x", ErrorKind::Tag))));
+/// assert_eq!(spaced_comma(","), Ok(("", ",")));
+/// assert_eq!(spaced_comma(" ,\t"), Ok(("", " ,\t")));
+/// assert_eq!(spaced_comma("x"), Err(Err::Error(("x", ErrorKind::Tag))));
 /// ```
 pub fn spaced_comma(input: &str) -> IResult<&str, &str> {
     recognize(tuple((space0, tag(","), space0)))(input)
@@ -86,20 +85,19 @@ pub fn spaced_comma(input: &str) -> IResult<&str, &str> {
 /// ```
 /// # use nom::{Err, error::ErrorKind, Needed};
 /// use rust_lcm_codegen::parser::{primitive_type, PrimitiveType};
-/// let parser = primitive_type;
 ///
-/// assert_eq!(parser("int8_t"), Ok(("", PrimitiveType::Int8)));
-/// assert_eq!(parser("int16_t"), Ok(("", PrimitiveType::Int16)));
-/// assert_eq!(parser("int32_t"), Ok(("", PrimitiveType::Int32)));
-/// assert_eq!(parser("int64_t"), Ok(("", PrimitiveType::Int64)));
-/// assert_eq!(parser("float"), Ok(("", PrimitiveType::Float)));
-/// assert_eq!(parser("double"), Ok(("", PrimitiveType::Double)));
-/// assert_eq!(parser("string"), Ok(("", PrimitiveType::String)));
-/// assert_eq!(parser("boolean"), Ok(("", PrimitiveType::Boolean)));
-/// assert_eq!(parser("byte"), Ok(("", PrimitiveType::Byte)));
+/// assert_eq!(primitive_type("int8_t"), Ok(("", PrimitiveType::Int8)));
+/// assert_eq!(primitive_type("int16_t"), Ok(("", PrimitiveType::Int16)));
+/// assert_eq!(primitive_type("int32_t"), Ok(("", PrimitiveType::Int32)));
+/// assert_eq!(primitive_type("int64_t"), Ok(("", PrimitiveType::Int64)));
+/// assert_eq!(primitive_type("float"), Ok(("", PrimitiveType::Float)));
+/// assert_eq!(primitive_type("double"), Ok(("", PrimitiveType::Double)));
+/// assert_eq!(primitive_type("string"), Ok(("", PrimitiveType::String)));
+/// assert_eq!(primitive_type("boolean"), Ok(("", PrimitiveType::Boolean)));
+/// assert_eq!(primitive_type("byte"), Ok(("", PrimitiveType::Byte)));
 ///
-/// assert_eq!(parser(""), Err(Err::Error(("", ErrorKind::Tag))));
-/// assert_eq!(parser("foo"), Err(Err::Error(("foo", ErrorKind::Tag))));
+/// assert_eq!(primitive_type(""), Err(Err::Error(("", ErrorKind::Tag))));
+/// assert_eq!(primitive_type("foo"), Err(Err::Error(("foo", ErrorKind::Tag))));
 /// ```
 pub fn primitive_type(input: &str) -> IResult<&str, PrimitiveType> {
     alt((
@@ -135,10 +133,9 @@ pub fn field_name(input: &str) -> IResult<&str, &str> {
 /// ```
 /// # use nom::{Err, error::ErrorKind, Needed};
 /// use rust_lcm_codegen::parser::{field_decl, FieldDecl, PrimitiveType};
-/// let parser = field_decl;
 ///
 /// assert_eq!(
-///     parser("int8_t foo"),
+///     field_decl("int8_t foo"),
 ///     Ok((
 ///         "",
 ///         FieldDecl {
@@ -148,8 +145,8 @@ pub fn field_name(input: &str) -> IResult<&str, &str> {
 ///     ))
 /// );
 ///
-/// assert_eq!(parser(""), Err(Err::Error(("", ErrorKind::Tag))));
-/// assert_eq!(parser("int8_t *!@"), Err(Err::Error(("*!@", ErrorKind::TakeWhile1))));
+/// assert_eq!(field_decl(""), Err(Err::Error(("", ErrorKind::Tag))));
+/// assert_eq!(field_decl("int8_t *!@"), Err(Err::Error(("*!@", ErrorKind::TakeWhile1))));
 ///
 /// ```
 pub fn field_decl(input: &str) -> IResult<&str, FieldDecl> {
@@ -181,54 +178,53 @@ fn recognize_float(input: &str) -> IResult<&str, &str> {
 /// ```
 /// # use nom::{Err, error::ErrorKind, Needed};
 /// use rust_lcm_codegen::parser::{const_value, ConstValue, PrimitiveType};
-/// let parser = const_value;
 ///
-/// assert_eq!(parser(PrimitiveType::Int8,  "42"), Ok(("", ConstValue::Int8( 42))));
-/// assert_eq!(parser(PrimitiveType::Int8, "-42"), Ok(("", ConstValue::Int8(-42))));
-/// assert_eq!(parser(PrimitiveType::Int8, "1024"),
+/// assert_eq!(const_value(PrimitiveType::Int8,  "42"), Ok(("", ConstValue::Int8( 42))));
+/// assert_eq!(const_value(PrimitiveType::Int8, "-42"), Ok(("", ConstValue::Int8(-42))));
+/// assert_eq!(const_value(PrimitiveType::Int8, "1024"),
 ///            Err(Err::Error(("1024", ErrorKind::MapRes))));
 ///
-/// assert_eq!(parser(PrimitiveType::Int16,  "1024"), Ok(("", ConstValue::Int16( 1024))));
-/// assert_eq!(parser(PrimitiveType::Int16, "-1024"), Ok(("", ConstValue::Int16(-1024))));
-/// assert_eq!(parser(PrimitiveType::Int16, "32768"),
+/// assert_eq!(const_value(PrimitiveType::Int16,  "1024"), Ok(("", ConstValue::Int16( 1024))));
+/// assert_eq!(const_value(PrimitiveType::Int16, "-1024"), Ok(("", ConstValue::Int16(-1024))));
+/// assert_eq!(const_value(PrimitiveType::Int16, "32768"),
 ///            Err(Err::Error(("32768", ErrorKind::MapRes))));
 ///
-/// assert_eq!(parser(PrimitiveType::Int32,  "32768"), Ok(("", ConstValue::Int32( 32768))));
-/// assert_eq!(parser(PrimitiveType::Int32, "-32768"), Ok(("", ConstValue::Int32(-32768))));
-/// assert_eq!(parser(PrimitiveType::Int32, "2147483648"),
+/// assert_eq!(const_value(PrimitiveType::Int32,  "32768"), Ok(("", ConstValue::Int32( 32768))));
+/// assert_eq!(const_value(PrimitiveType::Int32, "-32768"), Ok(("", ConstValue::Int32(-32768))));
+/// assert_eq!(const_value(PrimitiveType::Int32, "2147483648"),
 ///            Err(Err::Error(("2147483648", ErrorKind::MapRes))));
 ///
-/// assert_eq!(parser(PrimitiveType::Int64,  "2147483648"), Ok(("", ConstValue::Int64( 2147483648))));
-/// assert_eq!(parser(PrimitiveType::Int64, "-2147483648"), Ok(("", ConstValue::Int64(-2147483648))));
-/// assert_eq!(parser(PrimitiveType::Int64, "92233720368547758073"),
+/// assert_eq!(const_value(PrimitiveType::Int64,  "2147483648"), Ok(("", ConstValue::Int64( 2147483648))));
+/// assert_eq!(const_value(PrimitiveType::Int64, "-2147483648"), Ok(("", ConstValue::Int64(-2147483648))));
+/// assert_eq!(const_value(PrimitiveType::Int64, "92233720368547758073"),
 ///            Err(Err::Error(("92233720368547758073", ErrorKind::MapRes))));
 ///
-/// assert_eq!(parser(PrimitiveType::Float,           "10"), Ok(("", ConstValue::Float(         "10".to_owned()))));
-/// assert_eq!(parser(PrimitiveType::Float,        "10.35"), Ok(("", ConstValue::Float(      "10.35".to_owned()))));
-/// assert_eq!(parser(PrimitiveType::Float,       "-10.35"), Ok(("", ConstValue::Float(     "-10.35".to_owned()))));
-/// assert_eq!(parser(PrimitiveType::Float,     "10.35e12"), Ok(("", ConstValue::Float(   "10.35e12".to_owned()))));
-/// assert_eq!(parser(PrimitiveType::Float,    "-10.35e12"), Ok(("", ConstValue::Float(  "-10.35e12".to_owned()))));
-/// assert_eq!(parser(PrimitiveType::Float,  "10.35e12000"), Ok(("", ConstValue::Float("10.35e12000".to_owned()))));
-/// assert_eq!(parser(PrimitiveType::Float, "asdf"),
+/// assert_eq!(const_value(PrimitiveType::Float,           "10"), Ok(("", ConstValue::Float(         "10".to_owned()))));
+/// assert_eq!(const_value(PrimitiveType::Float,        "10.35"), Ok(("", ConstValue::Float(      "10.35".to_owned()))));
+/// assert_eq!(const_value(PrimitiveType::Float,       "-10.35"), Ok(("", ConstValue::Float(     "-10.35".to_owned()))));
+/// assert_eq!(const_value(PrimitiveType::Float,     "10.35e12"), Ok(("", ConstValue::Float(   "10.35e12".to_owned()))));
+/// assert_eq!(const_value(PrimitiveType::Float,    "-10.35e12"), Ok(("", ConstValue::Float(  "-10.35e12".to_owned()))));
+/// assert_eq!(const_value(PrimitiveType::Float,  "10.35e12000"), Ok(("", ConstValue::Float("10.35e12000".to_owned()))));
+/// assert_eq!(const_value(PrimitiveType::Float, "asdf"),
 ///            Err(Err::Error(("asdf", ErrorKind::Digit))));
 ///
-/// assert_eq!(parser(PrimitiveType::Double,           "10"), Ok(("", ConstValue::Double(         "10".to_owned()))));
-/// assert_eq!(parser(PrimitiveType::Double,        "10.35"), Ok(("", ConstValue::Double(      "10.35".to_owned()))));
-/// assert_eq!(parser(PrimitiveType::Double,       "-10.35"), Ok(("", ConstValue::Double(     "-10.35".to_owned()))));
-/// assert_eq!(parser(PrimitiveType::Double,     "10.35e12"), Ok(("", ConstValue::Double(   "10.35e12".to_owned()))));
-/// assert_eq!(parser(PrimitiveType::Double,    "-10.35e12"), Ok(("", ConstValue::Double(  "-10.35e12".to_owned()))));
-/// assert_eq!(parser(PrimitiveType::Double,  "10.35e12000"), Ok(("", ConstValue::Double("10.35e12000".to_owned()))));
-/// assert_eq!(parser(PrimitiveType::Double, "asdf"),
+/// assert_eq!(const_value(PrimitiveType::Double,           "10"), Ok(("", ConstValue::Double(         "10".to_owned()))));
+/// assert_eq!(const_value(PrimitiveType::Double,        "10.35"), Ok(("", ConstValue::Double(      "10.35".to_owned()))));
+/// assert_eq!(const_value(PrimitiveType::Double,       "-10.35"), Ok(("", ConstValue::Double(     "-10.35".to_owned()))));
+/// assert_eq!(const_value(PrimitiveType::Double,     "10.35e12"), Ok(("", ConstValue::Double(   "10.35e12".to_owned()))));
+/// assert_eq!(const_value(PrimitiveType::Double,    "-10.35e12"), Ok(("", ConstValue::Double(  "-10.35e12".to_owned()))));
+/// assert_eq!(const_value(PrimitiveType::Double,  "10.35e12000"), Ok(("", ConstValue::Double("10.35e12000".to_owned()))));
+/// assert_eq!(const_value(PrimitiveType::Double, "asdf"),
 ///            Err(Err::Error(("asdf", ErrorKind::Digit))));
 ///
-/// assert_eq!(parser(PrimitiveType::Boolean, "true"), Ok(("", ConstValue::Boolean(true))));
-/// assert_eq!(parser(PrimitiveType::Boolean, "false"), Ok(("", ConstValue::Boolean(false))));
-/// assert_eq!(parser(PrimitiveType::Boolean, "bogus"),
+/// assert_eq!(const_value(PrimitiveType::Boolean, "true"), Ok(("", ConstValue::Boolean(true))));
+/// assert_eq!(const_value(PrimitiveType::Boolean, "false"), Ok(("", ConstValue::Boolean(false))));
+/// assert_eq!(const_value(PrimitiveType::Boolean, "bogus"),
 ///            Err(Err::Error(("bogus", ErrorKind::Tag))));
 ///
-/// assert_eq!(parser(PrimitiveType::Byte,   "42"), Ok(("", ConstValue::Byte( 42))));
-/// assert_eq!(parser(PrimitiveType::Byte,  "-42"), Err(Err::Error(("-42", ErrorKind::Digit))));
-/// assert_eq!(parser(PrimitiveType::Byte, "1024"), Err(Err::Error(("1024", ErrorKind::MapRes))));
+/// assert_eq!(const_value(PrimitiveType::Byte,   "42"), Ok(("", ConstValue::Byte( 42))));
+/// assert_eq!(const_value(PrimitiveType::Byte,  "-42"), Err(Err::Error(("-42", ErrorKind::Digit))));
+/// assert_eq!(const_value(PrimitiveType::Byte, "1024"), Err(Err::Error(("1024", ErrorKind::MapRes))));
 ///
 /// ```
 pub fn const_value(ty: PrimitiveType, input: &str) -> IResult<&str, ConstValue> {
@@ -284,10 +280,9 @@ fn const_name_val(ty: PrimitiveType) -> impl Fn(&str) -> IResult<&str, (&str, Co
 /// ```
 /// # use nom::{Err, error::ErrorKind, Needed};
 /// use rust_lcm_codegen::parser::{const_decl, ConstDecl, ConstValue, PrimitiveType};
-/// let parser = const_decl;
 ///
 /// assert_eq!(
-///     parser("const int32_t YELLOW=1, GOLDENROD=2, CANARY=3"),
+///     const_decl("const int32_t YELLOW=1, GOLDENROD=2, CANARY=3"),
 ///     Ok((
 ///         "",
 ///         vec![
@@ -311,7 +306,7 @@ fn const_name_val(ty: PrimitiveType) -> impl Fn(&str) -> IResult<&str, (&str, Co
 /// );
 ///
 /// assert_eq!(
-///     parser("const double PI=3.14159"),
+///     const_decl("const double PI=3.14159"),
 ///     Ok((
 ///         "",
 ///         vec![ConstDecl {
@@ -393,8 +388,6 @@ pub fn struct_member(input: &str) -> IResult<&str, Vec<StructMember>> {
 ///         }
 ///     ))
 /// );
-///
-///
 /// ```
 pub fn struct_decl(input: &str) -> IResult<&str, StructDecl> {
     let (input, _) = tuple((tag("struct"), space1))(input)?;
