@@ -42,13 +42,13 @@ pub enum ConstValue {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct FieldDecl {
+pub struct Field {
     pub name: String,
     pub ty: PrimitiveType,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct ConstDecl {
+pub struct Const {
     pub name: String,
     pub ty: PrimitiveType,
     pub value: ConstValue,
@@ -56,12 +56,12 @@ pub struct ConstDecl {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum StructMember {
-    FieldDecl(FieldDecl),
-    ConstDecl(ConstDecl),
+    Field(Field),
+    Const(Const),
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct StructDecl {
+pub struct Struct {
     pub name: String,
     pub members: Vec<StructMember>,
 }
@@ -132,13 +132,13 @@ pub fn field_name(input: &str) -> IResult<&str, &str> {
 ///
 /// ```
 /// # use nom::{Err, error::ErrorKind, Needed};
-/// use rust_lcm_codegen::parser::{field_decl, FieldDecl, PrimitiveType};
+/// use rust_lcm_codegen::parser::{field_decl, Field, PrimitiveType};
 ///
 /// assert_eq!(
 ///     field_decl("int8_t foo"),
 ///     Ok((
 ///         "",
-///         FieldDecl {
+///         Field {
 ///             name: "foo".to_owned(),
 ///             ty: PrimitiveType::Int8
 ///         }
@@ -149,10 +149,10 @@ pub fn field_name(input: &str) -> IResult<&str, &str> {
 /// assert_eq!(field_decl("int8_t *!@"), Err(Err::Error(("*!@", ErrorKind::TakeWhile1))));
 ///
 /// ```
-pub fn field_decl(input: &str) -> IResult<&str, FieldDecl> {
+pub fn field_decl(input: &str) -> IResult<&str, Field> {
     map(
         separated_pair(primitive_type, space1, field_name),
-        |(ty, name)| FieldDecl {
+        |(ty, name)| Field {
             ty,
             name: name.to_owned(),
         },
@@ -279,24 +279,24 @@ fn const_name_val(ty: PrimitiveType) -> impl Fn(&str) -> IResult<&str, (&str, Co
 ///
 /// ```
 /// # use nom::{Err, error::ErrorKind, Needed};
-/// use rust_lcm_codegen::parser::{const_decl, ConstDecl, ConstValue, PrimitiveType};
+/// use rust_lcm_codegen::parser::{const_decl, Const, ConstValue, PrimitiveType};
 ///
 /// assert_eq!(
 ///     const_decl("const int32_t YELLOW=1, GOLDENROD=2, CANARY=3"),
 ///     Ok((
 ///         "",
 ///         vec![
-///           ConstDecl {
+///           Const {
 ///             name: "YELLOW".to_owned(),
 ///             ty: PrimitiveType::Int32,
 ///             value: ConstValue::Int32(1)
 ///           },
-///           ConstDecl {
+///           Const {
 ///             name: "GOLDENROD".to_owned(),
 ///             ty: PrimitiveType::Int32,
 ///             value: ConstValue::Int32(2)
 ///           },
-///           ConstDecl {
+///           Const {
 ///             name: "CANARY".to_owned(),
 ///             ty: PrimitiveType::Int32,
 ///             value: ConstValue::Int32(3)
@@ -309,7 +309,7 @@ fn const_name_val(ty: PrimitiveType) -> impl Fn(&str) -> IResult<&str, (&str, Co
 ///     const_decl("const double PI=3.14159"),
 ///     Ok((
 ///         "",
-///         vec![ConstDecl {
+///         vec![Const {
 ///             name: "PI".to_owned(),
 ///             ty: PrimitiveType::Double,
 ///             value: ConstValue::Double("3.14159".to_owned())
@@ -319,7 +319,7 @@ fn const_name_val(ty: PrimitiveType) -> impl Fn(&str) -> IResult<&str, (&str, Co
 ///
 ///
 /// ```
-pub fn const_decl(input: &str) -> IResult<&str, Vec<ConstDecl>> {
+pub fn const_decl(input: &str) -> IResult<&str, Vec<Const>> {
     let (input, _) = tuple((tag("const"), space1))(input)?;
     let (input, ty) = primitive_type(input)?;
     let (input, _) = space1(input)?;
@@ -329,7 +329,7 @@ pub fn const_decl(input: &str) -> IResult<&str, Vec<ConstDecl>> {
         input,
         name_vals
             .into_iter()
-            .map(|(name, value)| ConstDecl {
+            .map(|(name, value)| Const {
                 name: name.to_string(),
                 value,
                 ty,
@@ -340,9 +340,9 @@ pub fn const_decl(input: &str) -> IResult<&str, Vec<ConstDecl>> {
 
 pub fn struct_member(input: &str) -> IResult<&str, Vec<StructMember>> {
     alt((
-        map(field_decl, |fd| vec![StructMember::FieldDecl(fd)]),
+        map(field_decl, |fd| vec![StructMember::Field(fd)]),
         map(const_decl, |cds| {
-            cds.into_iter().map(StructMember::ConstDecl).collect()
+            cds.into_iter().map(StructMember::Const).collect()
         }),
     ))(input)
 }
@@ -351,24 +351,24 @@ pub fn struct_member(input: &str) -> IResult<&str, Vec<StructMember>> {
 ///
 /// ```
 /// # use nom::{Err, error::ErrorKind, Needed};
-/// use rust_lcm_codegen::parser::{struct_decl, StructDecl, ConstDecl, ConstValue, PrimitiveType, StructMember, FieldDecl};
+/// use rust_lcm_codegen::parser::{struct_decl, Struct, Const, ConstValue, PrimitiveType, StructMember, Field};
 ///
 /// assert_eq!(
 ///     struct_decl("struct my_struct {\n  const int32_t YELLOW=1;\n  int32_t color;\n}"),
 ///     Ok((
 ///         "",
-///         StructDecl {
+///         Struct {
 ///           name: "my_struct".to_string(),
 ///           members: vec![
-///             StructMember::ConstDecl(
-///               ConstDecl {
+///             StructMember::Const(
+///               Const {
 ///                 name: "YELLOW".to_owned(),
 ///                 ty: PrimitiveType::Int32,
 ///                 value: ConstValue::Int32(1)
 ///               }
 ///             ),
-///             StructMember::FieldDecl(
-///               FieldDecl {
+///             StructMember::Field(
+///               Field {
 ///                 name: "color".to_owned(),
 ///                 ty: PrimitiveType::Int32,
 ///               }
@@ -382,14 +382,14 @@ pub fn struct_member(input: &str) -> IResult<&str, Vec<StructMember>> {
 ///     struct_decl("struct empty_struct { }"),
 ///     Ok((
 ///         "",
-///         StructDecl {
+///         Struct {
 ///           name: "empty_struct".to_string(),
 ///           members: vec![],
 ///         }
 ///     ))
 /// );
 /// ```
-pub fn struct_decl(input: &str) -> IResult<&str, StructDecl> {
+pub fn struct_decl(input: &str) -> IResult<&str, Struct> {
     let (input, _) = tuple((tag("struct"), space1))(input)?;
     let (input, name) = field_name(input)?; // TODO change field_name to something more general
     let (input, _) = tuple((multispace1, tag("{"), multispace1))(input)?;
@@ -406,15 +406,10 @@ pub fn struct_decl(input: &str) -> IResult<&str, StructDecl> {
 
     Ok((
         input,
-        StructDecl {
+        Struct {
             name: name.to_owned(),
             members,
         },
     ))
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    use nom::{error::ErrorKind, Err};
-}
