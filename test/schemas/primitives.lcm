@@ -1,0 +1,13 @@
+package primitives;
+
+struct primitives_t {
+    int8_t int8_field;
+    int16_t int16_field;
+    int32_t int32_field;
+    int64_t int64_field;
+    float float_field;
+    double double_field;
+    string string_field;
+    boolean bool_field;
+    byte byte_field;
+}
