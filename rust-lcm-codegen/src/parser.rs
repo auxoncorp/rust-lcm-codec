@@ -1,19 +1,12 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
-
 use nom::{
     branch::alt,
-    bytes::complete::{tag, tag_no_case, take_while, take_while1},
+    bytes::complete::{tag, tag_no_case, take_while1},
     character::complete::{
-        alpha1, digit0, digit1, hex_digit1, multispace0, multispace1, oct_digit1, space0, space1,
+        digit1, hex_digit1, multispace0, multispace1, oct_digit1, space0, space1,
     },
-    character::is_alphanumeric,
-    combinator::{cut, flat_map, map, map_res, opt, recognize, value, verify},
-    do_parse,
-    error::ParseError,
-    multi::{many0, many1, separated_nonempty_list},
-    named,
-    sequence::{delimited, preceded, separated_pair, terminated, tuple},
+    combinator::{map, map_res, opt, recognize, value, verify},
+    multi::{many0, separated_nonempty_list},
+    sequence::{preceded, separated_pair, terminated, tuple},
     IResult,
 };
 
