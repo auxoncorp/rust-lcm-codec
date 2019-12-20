@@ -3,8 +3,10 @@
 
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_while, take_while1, tag_no_case},
-    character::complete::{alpha1, digit0, digit1, multispace0, multispace1, space0, space1, hex_digit1, oct_digit1},
+    bytes::complete::{tag, tag_no_case, take_while, take_while1},
+    character::complete::{
+        alpha1, digit0, digit1, hex_digit1, multispace0, multispace1, oct_digit1, space0, space1,
+    },
     character::is_alphanumeric,
     combinator::{cut, flat_map, map, map_res, opt, recognize, value, verify},
     do_parse,
@@ -29,6 +31,31 @@ pub enum PrimitiveType {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+pub enum ArrayDimension {
+    Static { size: u32 },
+    Dynamic { field_name: String },
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct ArrayType {
+    pub item_type: Box<Type>,
+    pub dimensions: Vec<ArrayDimension>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct StructType {
+    pub namespace: Option<String>,
+    pub name: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum Type {
+    Primitive(PrimitiveType),
+    Array(ArrayType),
+    Struct(StructType),
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub enum ConstValue {
     Int8(i8),
     Int16(i16),
@@ -44,7 +71,7 @@ pub enum ConstValue {
 #[derive(Debug, Eq, PartialEq)]
 pub struct Field {
     pub name: String,
-    pub ty: PrimitiveType,
+    pub ty: Type,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -91,6 +118,19 @@ pub fn spaced_comma(input: &str) -> IResult<&str, &str> {
     recognize(tuple((space0, tag(","), space0)))(input)
 }
 
+/// Names that can be used for structs, packages, or fields
+/// ```
+/// # use nom::{Err, error::ErrorKind, Needed};
+/// use rust_lcm_codegen::parser::ident;
+///
+/// assert_eq!(ident("foo"), Ok(("", "foo")));
+/// assert_eq!(ident("foo_bar"), Ok(("", "foo_bar")));
+/// assert_eq!(ident(""), Err(Err::Error(("", ErrorKind::TakeWhile1))));
+/// ```
+pub fn ident(input: &str) -> IResult<&str, &str> {
+    recognize(take_while1(|c: char| c.is_alphanumeric() || c == '_'))(input)
+}
+
 /// Parse an LCM primitive type
 ///
 /// ```
@@ -124,26 +164,61 @@ pub fn primitive_type(input: &str) -> IResult<&str, PrimitiveType> {
     ))(input)
 }
 
-/// Parse an LCM field name
-///
+/// Parse the type part of a field decl.
 /// ```
 /// # use nom::{Err, error::ErrorKind, Needed};
-/// let parser = rust_lcm_codegen::parser::field_name;
+/// use rust_lcm_codegen::parser::{field_type, Type, PrimitiveType, StructType};
 ///
-/// assert_eq!(parser("foo"), Ok(("", "foo")));
-/// assert_eq!(parser("foo_bar"), Ok(("", "foo_bar")));
-/// assert_eq!(parser(""), Err(Err::Error(("", ErrorKind::TakeWhile1))));
+/// assert_eq!(field_type("int8_t"), Ok(("", Type::Primitive(PrimitiveType::Int8))));
+///
+/// assert_eq!(field_type("foo.bar"),
+///            Ok(("", Type::Struct(StructType { namespace: Some("foo".to_string()), name: "bar".to_string() }))));
+///
+/// assert_eq!(field_type("foo"),
+///            Ok(("", Type::Struct(StructType { namespace: None, name: "foo".to_string() }))));
+///
 /// ```
-pub fn field_name(input: &str) -> IResult<&str, &str> {
-    recognize(take_while1(|c: char| c.is_alphanumeric() || c == '_'))(input)
+pub fn field_type(input: &str) -> IResult<&str, Type> {
+    alt((
+        map(primitive_type, Type::Primitive),
+        map(separated_pair(ident, tag("."), ident), |(ns, n)| {
+            Type::Struct(StructType {
+                namespace: Some(ns.to_string()),
+                name: n.to_string(),
+            })
+        }),
+        map(ident, |n| {
+            Type::Struct(StructType {
+                namespace: None,
+                name: n.to_string(),
+            })
+        }),
+    ))(input)
 }
 
-/// Parse a field declaration, inside a struct. (doesn't handle the semicolon or
-/// preceding whitespace)
+fn array_dimension(input: &str) -> IResult<&str, ArrayDimension> {
+    preceded(
+        tag("["),
+        terminated(
+            alt((
+                map(map_res(digit1, |s: &str| s.parse::<u32>()), |size| {
+                    ArrayDimension::Static { size }
+                }),
+                map(ident, |s| ArrayDimension::Dynamic {
+                    field_name: s.to_string(),
+                }),
+            )),
+            tag("]"),
+        ),
+    )(input)
+}
+
+/// Parse a field declaration, inside a struct, including array dimensions.
+/// (doesn't handle the semicolon or preceding whitespace)
 ///
 /// ```
 /// # use nom::{Err, error::ErrorKind, Needed};
-/// use rust_lcm_codegen::parser::{field_decl, Field, PrimitiveType};
+/// use rust_lcm_codegen::parser::{field_decl, Field, PrimitiveType, Type, StructType, ArrayDimension, ArrayType};
 ///
 /// assert_eq!(
 ///     field_decl("int8_t foo"),
@@ -151,23 +226,55 @@ pub fn field_name(input: &str) -> IResult<&str, &str> {
 ///         "",
 ///         Field {
 ///             name: "foo".to_owned(),
-///             ty: PrimitiveType::Int8
+///             ty: Type::Primitive(PrimitiveType::Int8)
 ///         }
 ///     ))
 /// );
 ///
-/// assert_eq!(field_decl(""), Err(Err::Error(("", ErrorKind::Tag))));
+/// assert_eq!(
+///     field_decl("ns.name foo[dim][2]"),
+///     Ok((
+///         "",
+///         Field {
+///           name: "foo".to_owned(),
+///           ty: Type::Array(ArrayType {
+///             item_type: Box::new(
+///               Type::Struct(StructType { namespace: Some("ns".to_string()),
+///                                         name: "name".to_string() })
+///             ),
+///             dimensions: vec![
+///               ArrayDimension::Dynamic { field_name: "dim".to_string() },
+///               ArrayDimension::Static { size: 2 },
+///             ]
+///           })
+///         }
+///     ))
+/// );
+///
+/// assert_eq!(field_decl(""), Err(Err::Error(("", ErrorKind::TakeWhile1))));
 /// assert_eq!(field_decl("int8_t *!@"), Err(Err::Error(("*!@", ErrorKind::TakeWhile1))));
 ///
 /// ```
 pub fn field_decl(input: &str) -> IResult<&str, Field> {
-    map(
-        separated_pair(primitive_type, space1, field_name),
-        |(ty, name)| Field {
+    let (input, mut ty) = field_type(input)?;
+    let (input, _) = space1(input)?;
+    let (input, name) = ident(input)?;
+    let (input, dims) = many0(array_dimension)(input)?;
+
+    if dims.len() > 0 {
+        ty = Type::Array(ArrayType {
+            item_type: Box::new(ty),
+            dimensions: dims,
+        });
+    }
+
+    Ok((
+        input,
+        Field {
             ty,
             name: name.to_owned(),
         },
-    )(input)
+    ))
 }
 
 /// Recognize something that looks like an integer, positive or negative. Return a tuple of the
@@ -179,7 +286,7 @@ fn recognize_int(input: &str) -> IResult<&str, (String, u32)> {
     let (input, radix) = alt((
         value(16, tag_no_case("0x")),
         value(8, tag("0")),
-        value(10, tag(""))
+        value(10, tag("")),
     ))(input)?;
 
     let (input, body) = match radix {
@@ -290,7 +397,7 @@ pub fn const_value(ty: PrimitiveType, input: &str) -> IResult<&str, ConstValue> 
 
 fn const_name_val(ty: PrimitiveType) -> impl Fn(&str) -> IResult<&str, (&str, ConstValue)> {
     move |input: &str| {
-        let (input, name) = field_name(input)?;
+        let (input, name) = ident(input)?;
         let (input, _) = tuple((space0, tag("="), space0))(input)?;
         let (input, value) = const_value(ty, input)?;
 
@@ -364,10 +471,10 @@ pub fn const_decl(input: &str) -> IResult<&str, Vec<Const>> {
 
 pub fn struct_member(input: &str) -> IResult<&str, Vec<StructMember>> {
     alt((
-        map(field_decl, |fd| vec![StructMember::Field(fd)]),
         map(const_decl, |cds| {
             cds.into_iter().map(StructMember::Const).collect()
         }),
+        map(field_decl, |fd| vec![StructMember::Field(fd)]),
     ))(input)
 }
 
@@ -375,7 +482,18 @@ pub fn struct_member(input: &str) -> IResult<&str, Vec<StructMember>> {
 ///
 /// ```
 /// # use nom::{Err, error::ErrorKind, Needed};
-/// use rust_lcm_codegen::parser::{struct_decl, Struct, Const, ConstValue, PrimitiveType, StructMember, Field};
+/// use rust_lcm_codegen::parser::{struct_decl, Struct, Const, ConstValue, PrimitiveType, StructMember, Field, Type};
+///
+/// assert_eq!(
+///     struct_decl("struct empty_struct { }"),
+///     Ok((
+///         "",
+///         Struct {
+///           name: "empty_struct".to_string(),
+///           members: vec![],
+///         }
+///     ))
+/// );
 ///
 /// assert_eq!(
 ///     struct_decl("struct my_struct {\n  const int32_t YELLOW=1;\n  int32_t color;\n}"),
@@ -394,28 +512,17 @@ pub fn struct_member(input: &str) -> IResult<&str, Vec<StructMember>> {
 ///             StructMember::Field(
 ///               Field {
 ///                 name: "color".to_owned(),
-///                 ty: PrimitiveType::Int32,
+///                 ty: Type::Primitive(PrimitiveType::Int32),
 ///               }
 ///             ),
 ///           ]
 ///         }
 ///     ))
 /// );
-///
-/// assert_eq!(
-///     struct_decl("struct empty_struct { }"),
-///     Ok((
-///         "",
-///         Struct {
-///           name: "empty_struct".to_string(),
-///           members: vec![],
-///         }
-///     ))
-/// );
 /// ```
 pub fn struct_decl(input: &str) -> IResult<&str, Struct> {
     let (input, _) = tuple((tag("struct"), space1))(input)?;
-    let (input, name) = field_name(input)?; // TODO change field_name to something more general
+    let (input, name) = ident(input)?;
     let (input, _) = tuple((multispace1, tag("{"), multispace1))(input)?;
 
     let (input, member_vecs) = many0(terminated(
@@ -457,7 +564,7 @@ pub fn struct_decl(input: &str) -> IResult<&str, Struct> {
 /// ```
 pub fn package_decl(input: &str) -> IResult<&str, Package> {
     map(
-        preceded(tuple((tag("package"), space1)), field_name),
+        preceded(tuple((tag("package"), space1)), ident),
         |name: &str| Package {
             name: name.to_string(),
         },
