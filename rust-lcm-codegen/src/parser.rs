@@ -23,32 +23,32 @@ pub enum PrimitiveType {
     Byte,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ArrayDimension {
     Static { size: u32 },
     Dynamic { field_name: String },
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ArrayType {
     pub item_type: Box<Type>,
     pub dimensions: Vec<ArrayDimension>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct StructType {
     pub namespace: Option<String>,
     pub name: String,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Type {
     Primitive(PrimitiveType),
     Array(ArrayType),
     Struct(StructType),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ConstValue {
     Int8(i8),
     Int16(i16),
@@ -61,39 +61,34 @@ pub enum ConstValue {
     Byte(u8),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Field {
     pub name: String,
     pub ty: Type,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Const {
     pub name: String,
     pub ty: PrimitiveType,
     pub value: ConstValue,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum StructMember {
     Field(Field),
     Const(Const),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Struct {
     pub name: String,
     pub members: Vec<StructMember>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
-pub struct Package {
-    pub name: String,
-}
-
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Schema {
-    pub package: Option<Package>,
+    pub package: Option<String>,
     pub structs: Vec<Struct>,
 }
 
@@ -543,38 +538,34 @@ pub fn struct_decl(input: &str) -> IResult<&str, Struct> {
 ///
 /// ```
 /// # use nom::{Err, error::ErrorKind, Needed};
-/// use rust_lcm_codegen::parser::{package_decl, Package};
+/// use rust_lcm_codegen::parser::package_decl;
 ///
 /// assert_eq!(
 ///     package_decl("package my_package"),
 ///     Ok((
 ///         "",
-///         Package {
-///           name: "my_package".to_string(),
-///         }
+///         "my_package".to_string(),
 ///     ))
 /// );
 /// ```
-pub fn package_decl(input: &str) -> IResult<&str, Package> {
+pub fn package_decl(input: &str) -> IResult<&str, String> {
     map(
         preceded(tuple((tag("package"), space1)), ident),
-        |name: &str| Package {
-            name: name.to_string(),
-        },
+        |name: &str| name.to_string(),
     )(input)
 }
 
 /// Parse an entire schema file
 /// ```
 /// # use nom::{Err, error::ErrorKind, Needed};
-/// use rust_lcm_codegen::parser::{schema, Package, Schema, Struct, Const, ConstValue, PrimitiveType, StructMember, Field};
+/// use rust_lcm_codegen::parser::{schema, Schema, Struct, Const, ConstValue, PrimitiveType, StructMember, Field};
 ///
 /// assert_eq!(
 ///     schema("package test;\n\nstruct empty { }\nstruct empty2 { }"),
 ///     Ok((
 ///         "",
 ///         Schema {
-///           package: Some(Package { name: "test".to_string() }),
+///           package: Some("test".to_string()),
 ///           structs: vec![
 ///             Struct {
 ///               name: "empty".to_string(),
