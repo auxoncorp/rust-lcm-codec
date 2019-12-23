@@ -1,11 +1,9 @@
 use nom::{
     branch::alt,
-    bytes::complete::{tag, tag_no_case, take_while1},
-    character::complete::{
-        digit1, hex_digit1, multispace0, multispace1, oct_digit1, space0, space1,
-    },
+    bytes::complete::{tag, tag_no_case, take_until, take_while1},
+    character::complete::{digit1, hex_digit1, multispace1, not_line_ending, oct_digit1},
     combinator::{map, map_res, opt, recognize, value, verify},
-    multi::{many0, separated_nonempty_list},
+    multi::{many0, many1, separated_nonempty_list},
     sequence::{preceded, separated_pair, terminated, tuple},
     IResult,
 };
@@ -92,6 +90,42 @@ pub struct Schema {
     pub structs: Vec<Struct>,
 }
 
+/// Match a C-style comment
+///
+/// ```
+/// # use nom::{Err, error::ErrorKind, Needed};
+/// use rust_lcm_codegen::parser::block_comment;
+///
+/// assert_eq!(block_comment("/* test */"), Ok(("", " test ")));
+/// ```
+pub fn block_comment(input: &str) -> IResult<&str, &str> {
+    let (input, _) = tag("/*")(input)?;
+    let (input, comment) = take_until("*/")(input)?;
+    let (input, _) = tag("*/")(input)?;
+
+    Ok((input, comment))
+}
+
+/// Match a C++-style comment
+///
+/// ```
+/// # use nom::{Err, error::ErrorKind, Needed};
+/// use rust_lcm_codegen::parser::line_comment;
+///
+/// assert_eq!(line_comment("// test\nmore"), Ok(("\nmore", " test")));
+/// ```
+pub fn line_comment(input: &str) -> IResult<&str, &str> {
+    let (input, _) = tag("//")(input)?;
+    let (input, comment) = not_line_ending(input)?;
+
+    Ok((input, comment))
+}
+
+/// Whitespace parser. This includes regular spaces, newlines, and comments.
+pub fn ws(input: &str) -> IResult<&str, ()> {
+    value((), many1(alt((block_comment, line_comment, multispace1))))(input)
+}
+
 /// Match a comma, optionally surrounded by spaces
 ///
 /// ```
@@ -103,7 +137,7 @@ pub struct Schema {
 /// assert_eq!(spaced_comma("x"), Err(Err::Error(("x", ErrorKind::Tag))));
 /// ```
 pub fn spaced_comma(input: &str) -> IResult<&str, &str> {
-    recognize(tuple((space0, tag(","), space0)))(input)
+    recognize(tuple((opt(ws), tag(","), opt(ws))))(input)
 }
 
 /// Names that can be used for structs, packages, or fields
@@ -185,20 +219,23 @@ pub fn field_type(input: &str) -> IResult<&str, Type> {
 }
 
 fn array_dimension(input: &str) -> IResult<&str, ArrayDimension> {
-    preceded(
-        tag("["),
-        terminated(
-            alt((
-                map(map_res(digit1, |s: &str| s.parse::<u32>()), |size| {
-                    ArrayDimension::Static { size }
-                }),
-                map(ident, |s| ArrayDimension::Dynamic {
-                    field_name: s.to_string(),
-                }),
-            )),
-            tag("]"),
-        ),
-    )(input)
+    let (input, _) = tag("[")(input)?;
+    let (input, _) = opt(ws)(input)?;
+
+    let (input, dim) = alt((
+        map(map_res(digit1, |s: &str| s.parse::<u32>()), |size| {
+            ArrayDimension::Static { size }
+        }),
+        map(ident, |s| ArrayDimension::Dynamic {
+            field_name: s.to_string(),
+        }),
+    ))(input)?;
+
+    let (input, _) = opt(ws)(input)?;
+    let (input, _) = tag("]")(input)?;
+    let (input, _) = opt(ws)(input)?;
+
+    Ok((input, dim))
 }
 
 /// Parse a field declaration, inside a struct, including array dimensions.
@@ -245,7 +282,7 @@ fn array_dimension(input: &str) -> IResult<&str, ArrayDimension> {
 /// ```
 pub fn field_decl(input: &str) -> IResult<&str, Field> {
     let (input, mut ty) = field_type(input)?;
-    let (input, _) = space1(input)?;
+    let (input, _) = ws(input)?;
     let (input, name) = ident(input)?;
     let (input, dims) = many0(array_dimension)(input)?;
 
@@ -386,7 +423,7 @@ pub fn const_value(ty: PrimitiveType, input: &str) -> IResult<&str, ConstValue> 
 fn const_name_val(ty: PrimitiveType) -> impl Fn(&str) -> IResult<&str, (&str, ConstValue)> {
     move |input: &str| {
         let (input, name) = ident(input)?;
-        let (input, _) = tuple((space0, tag("="), space0))(input)?;
+        let (input, _) = tuple((opt(ws), tag("="), opt(ws)))(input)?;
         let (input, value) = const_value(ty, input)?;
 
         Ok((input, (name, value)))
@@ -439,9 +476,9 @@ fn const_name_val(ty: PrimitiveType) -> impl Fn(&str) -> IResult<&str, (&str, Co
 ///
 /// ```
 pub fn const_decl(input: &str) -> IResult<&str, Vec<Const>> {
-    let (input, _) = tuple((tag("const"), space1))(input)?;
+    let (input, _) = tuple((tag("const"), ws))(input)?;
     let (input, ty) = primitive_type(input)?;
-    let (input, _) = space1(input)?;
+    let (input, _) = ws(input)?;
     let (input, name_vals) = separated_nonempty_list(spaced_comma, const_name_val(ty))(input)?;
 
     Ok((
@@ -509,13 +546,13 @@ pub fn struct_member(input: &str) -> IResult<&str, Vec<StructMember>> {
 /// );
 /// ```
 pub fn struct_decl(input: &str) -> IResult<&str, Struct> {
-    let (input, _) = tuple((tag("struct"), space1))(input)?;
+    let (input, _) = tuple((tag("struct"), ws))(input)?;
     let (input, name) = ident(input)?;
-    let (input, _) = tuple((multispace1, tag("{"), multispace1))(input)?;
+    let (input, _) = tuple((ws, tag("{"), ws))(input)?;
 
     let (input, member_vecs) = many0(terminated(
         struct_member,
-        tuple((space0, tag(";"), multispace0)),
+        tuple((opt(ws), tag(";"), opt(ws))),
     ))(input)?;
 
     let (input, _) = tag("}")(input)?;
@@ -550,7 +587,7 @@ pub fn struct_decl(input: &str) -> IResult<&str, Struct> {
 /// ```
 pub fn package_decl(input: &str) -> IResult<&str, String> {
     map(
-        preceded(tuple((tag("package"), space1)), ident),
+        preceded(tuple((tag("package"), ws)), ident),
         |name: &str| name.to_string(),
     )(input)
 }
@@ -597,13 +634,47 @@ pub fn package_decl(input: &str) -> IResult<&str, String> {
 /// );
 /// ```
 pub fn schema(input: &str) -> IResult<&str, Schema> {
-    let (input, _) = multispace0(input)?;
+    let (input, _) = opt(ws)(input)?;
     let (input, package) = opt(terminated(
         package_decl,
-        tuple((space0, tag(";"), multispace0)),
+        tuple((opt(ws), tag(";"), opt(ws))),
     ))(input)?;
 
-    let (input, structs) = many0(terminated(struct_decl, multispace0))(input)?;
+    let (input, structs) = many0(terminated(struct_decl, opt(ws)))(input)?;
 
     Ok((input, Schema { package, structs }))
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn comments_test() {
+        let schema_text = "
+/* before */
+// before
+package comment_stress_test;
+
+struct s {
+  /* a */
+  int32_t a; // a
+
+  /* b */
+  int32_t b; // b
+
+  /* c */
+  int32_t c[ /* two */ 2]; // c
+
+  /* D */
+  const int32_t D = /* three */ 3; //  D
+}
+
+/* after */
+// after
+";
+
+        let (unparsed, s) = schema(schema_text).unwrap();
+        assert_eq!(unparsed, "");
+    }
 }
