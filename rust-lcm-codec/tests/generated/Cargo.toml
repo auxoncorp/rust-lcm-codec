@@ -1,0 +1,12 @@
+[package]
+authors = ["Russell Mull <russell@auxon.io>"]
+edition = "2018"
+name = "generated"
+version = "0.1.0"
+
+[lib]
+name = "generated"
+path = "lib.rs"
+
+[build-dependencies]
+rust-lcm-codegen = { path = "../../../rust-lcm-codegen" }

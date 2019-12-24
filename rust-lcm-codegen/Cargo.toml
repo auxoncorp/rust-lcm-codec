@@ -6,3 +6,5 @@ version = "0.1.0"
 
 [dependencies]
 nom = "5"
+quote = "1.0"
+proc-macro2 = "1.0"

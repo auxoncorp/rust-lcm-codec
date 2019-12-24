@@ -1,5 +1,6 @@
 [workspace]
 members = [
   "rust-lcm-codec",
-  "rust-lcm-codegen"
+  "rust-lcm-codec/tests/generated",
+  "rust-lcm-codegen",
 ]
