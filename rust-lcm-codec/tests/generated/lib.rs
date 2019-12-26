@@ -1,3 +1,2 @@
-pub fn my_fn() {
+include!(concat!(env!("OUT_DIR"), "/lcm.rs"));
 
-}

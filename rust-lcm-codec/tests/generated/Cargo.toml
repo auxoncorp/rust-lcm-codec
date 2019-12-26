@@ -8,5 +8,8 @@ version = "0.1.0"
 name = "generated"
 path = "lib.rs"
 
+[dependencies]
+rust-lcm-codec = { path = "../../../rust-lcm-codec" }
+
 [build-dependencies]
 rust-lcm-codegen = { path = "../../../rust-lcm-codegen" }
