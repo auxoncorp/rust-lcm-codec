@@ -124,7 +124,7 @@ impl Environment {
                                 }
                             }
                         }
-                        None => ()
+                        None => (),
                     }
                 }
                 return None;
@@ -230,7 +230,7 @@ struct b {
 
         let env = Environment {
             local_schema: schema_b.clone(),
-            all_schemas
+            all_schemas,
         };
 
         let b = &schema_b.structs[0];

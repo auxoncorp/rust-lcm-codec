@@ -71,8 +71,8 @@ struct WithArray_Write_READY<'a, W: StreamingWriter> {
 }
 struct WithArray_Write_vals<'a, W: StreamingWriter> {
     writer: &'a mut W,
-    array_dims: [u64;2],
-    array_cursor: [u64;2],
+    array_dims: [u64; 2],
+    array_cursor: [u64; 2],
 }
 struct WithArray_Write_post<'a, W: StreamingWriter> {
     writer: &'a mut W,
@@ -235,5 +235,3 @@ fn test_nested_write() {
         .unwrap();
     let _nw = nw.write_b(2).unwrap();
 }
-
-
