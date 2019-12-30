@@ -235,36 +235,30 @@ fn emit_struct(s: &parser::Struct, env: &fingerprint::Environment) -> TokenStrea
 
 fn emit_writer_state_decl(ws: &WriterState, env: &fingerprint::Environment) -> TokenStream {
     let struct_ident = ws.ident();
-    if ws.field.is_some() {
-        quote! {
-            pub struct #struct_ident<'a, W: rust_lcm_codec::StreamingWriter> {
-                writer: &'a mut W,
-            }
-        }
+    let allow_dead = if ws.state_name == STATE_NAME_DONE {
+        Some(quote!(#[allow(dead_code)]))
     } else {
-        // Don't include the writer for the DONE state, which has no fields to write
-        quote! {
-            pub struct #struct_ident<'a, W: rust_lcm_codec::StreamingWriter> {
-                _phantom_writer: core::marker::PhantomData<&'a mut W>,
-            }
+        None
+    };
+    quote! {
+        pub struct #struct_ident<'a, W: rust_lcm_codec::StreamingWriter> {
+            #allow_dead
+            pub(super) writer: &'a mut W,
         }
     }
 }
 
 fn emit_reader_state_decl(rs: &ReaderState, env: &fingerprint::Environment) -> TokenStream {
     let struct_ident = rs.ident();
-    if rs.field.is_some() {
-        quote! {
-            pub struct #struct_ident<'a, W: rust_lcm_codec::StreamingReader> {
-                reader: &'a mut W,
-            }
-        }
+    let allow_dead = if rs.state_name == STATE_NAME_DONE {
+        Some(quote!(#[allow(dead_code)]))
     } else {
-        // Don't include the reader for the DONE state, which has no fields to read
-        quote! {
-            pub struct #struct_ident<'a, W: rust_lcm_codec::StreamingReader> {
-                _phantom_reader: core::marker::PhantomData<&'a mut W>,
-            }
+        None
+    };
+    quote! {
+        pub struct #struct_ident<'a, W: rust_lcm_codec::StreamingReader> {
+            #allow_dead
+            pub(super) reader: &'a mut W,
         }
     }
 }
@@ -292,47 +286,68 @@ fn emit_writer_state_transition(
         Some(ref f) => {
             let start_type = ws.ident();
             let next_type = ws_next.ident();
-            let write_method = format_ident!("write_{}", f.name);
-            let rust_field_type = match f.ty {
+            let write_method_ident = format_ident!("write_{}", f.name);
+            let write_method = match &f.ty {
                 parser::Type::Primitive(pt) => {
-                    Some(format_ident!("{}", primitive_type_to_rust(&pt)))
+                    let rust_field_type = format_ident!("{}", primitive_type_to_rust(&pt));
+                    let write_invocation = match pt {
+                        PrimitiveType::String => quote! {
+                            rust_lcm_codec::write_str_value(val, self.writer)?;
+                        },
+                        _ => quote! {
+                            use rust_lcm_codec::SerializeValue;
+                            val.write_value(self.writer)?;
+                        },
+                    };
+                    quote! {
+                        pub fn #write_method_ident(self, val: & #rust_field_type) -> Result<#next_type<'a, W>, W::Error> {
+                            #write_invocation
+                            Ok(#next_type {
+                                writer: self.writer,
+                            })
+                        }
+                    }
+                }
+                parser::Type::Struct(st) => {
+                    let field_struct_write_ready: Ident = WriterState {
+                        state_name: STATE_NAME_READY.to_string(),
+                        struct_name: st.name.clone(),
+                        field: None,
+                    }
+                    .ident();
+                    let field_struct_write_done: Ident = WriterState {
+                        state_name: STATE_NAME_DONE.to_string(),
+                        struct_name: st.name.clone(),
+                        field: None,
+                    }
+                    .ident();
+                    let struct_ns_prefix = if let Some(ns) = &st.namespace {
+                        let namespace_ident = format_ident!("{}", ns);
+                        Some(quote!(super::#namespace_ident::))
+                    } else {
+                        None
+                    };
+                    quote! {
+                        pub fn #write_method_ident<F>(self, f: F) -> Result<#next_type<'a, W>, W::Error>
+                            where F: FnOnce(#struct_ns_prefix#field_struct_write_ready<'a, W>) -> Result<#struct_ns_prefix#field_struct_write_done<'a, W>, W::Error>
+                        {
+                            let ready = #struct_ns_prefix#field_struct_write_ready {
+                                writer: self.writer,
+                            };
+                            let done = f(ready)?;
+                            Ok(#next_type {
+                                writer: done.writer,
+                            })
+                        }
+                    }
                 }
                 _ => unimplemented!(),
-            };
-
-            let next_state = if ws_next.field.is_some() {
-                quote! {
-                    #next_type {
-                        writer: self.writer,
-                    }
-                }
-            } else {
-                quote! {
-                    #next_type {
-                        _phantom_writer: core::marker::PhantomData { },
-                    }
-                }
-            };
-
-            let write_invocation = match f.ty {
-                Type::Primitive(PrimitiveType::String) => quote! {
-                    rust_lcm_codec::write_str_value(val, self.writer)?;
-                },
-                Type::Primitive(_) => quote! {
-                    use rust_lcm_codec::SerializeValue;
-                    val.write_value(self.writer)?;
-                },
-                Type::Array(_) => unimplemented!(),
-                Type::Struct(_) => unimplemented!(),
             };
 
             quote! {
                 impl<'a, W: rust_lcm_codec::StreamingWriter> #start_type<'a, W> {
                     #[inline(always)]
-                    pub fn #write_method(self, val: & #rust_field_type) -> Result<#next_type<'a, W>, W::Error> {
-                        #write_invocation
-                        Ok(#next_state)
-                    }
+                    #write_method
                 }
             }
         }
@@ -350,57 +365,80 @@ fn emit_reader_state_transition(
             let start_type = rs.ident();
             let next_type = rs_next.ident();
             let read_method_ident = format_ident!("read_{}", f.name);
-            let read_method_ident_mut = format_ident!("read_{}_mut", f.name);
-            let rust_field_type = match f.ty {
-                parser::Type::Primitive(pt) => {
-                    Some(format_ident!("{}", primitive_type_to_rust(&pt)))
-                }
-                _ => unimplemented!(),
-            };
+            let read_method_ident_into = format_ident!("read_{}_into", f.name);
 
-            let next_state = if rs_next.field.is_some() {
-                quote! {
-                    #next_type {
-                        reader: self.reader,
+            let read_methods = match &f.ty {
+                Type::Primitive(pt) => {
+                    let rust_field_type = Some(format_ident!("{}", primitive_type_to_rust(&pt)));
+                    let next_state = quote! {
+                        #next_type {
+                            reader: self.reader,
+                        }
+                    };
+                    match pt {
+                        PrimitiveType::String => quote! {
+                            pub fn #read_method_ident(self) -> Result<(&'a #rust_field_type, #next_type<'a, R>), rust_lcm_codec::DecodeValueError<R::Error>> {
+                                let s = unsafe { core::mem::transmute(rust_lcm_codec::read_str_value(self.reader)?) };
+                                Ok((s, #next_state))
+                            }
+                        },
+                        _ => quote! {
+                            pub fn #read_method_ident(self) -> Result<(#rust_field_type, #next_type<'a, R>), rust_lcm_codec::DecodeValueError<R::Error>> {
+                                use rust_lcm_codec::SerializeValue;
+                                let v = SerializeValue::read_new_value(self.reader)?;
+                                Ok((v, #next_state))
+                            }
+
+                            pub fn #read_method_ident_into(self, val: &mut #rust_field_type) -> Result<#next_type<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>> {
+                                use rust_lcm_codec::SerializeValue;
+                                val.read_value(self.reader)?;
+                                Ok(#next_state)
+                            }
+                        },
                     }
                 }
-            } else {
-                quote! {
-                    #next_type {
-                        _phantom_reader: core::marker::PhantomData { },
+                Type::Struct(st) => {
+                    // TODO - incorporate namespace
+                    let field_struct_read_ready: Ident = ReaderState {
+                        state_name: STATE_NAME_READY.to_string(),
+                        struct_name: st.name.clone(),
+                        field: None,
+                    }
+                    .ident();
+                    let field_struct_read_done: Ident = ReaderState {
+                        state_name: STATE_NAME_DONE.to_string(),
+                        struct_name: st.name.clone(),
+                        field: None,
+                    }
+                    .ident();
+                    let struct_ns_prefix = if let Some(ns) = &st.namespace {
+                        let namespace_ident = format_ident!("{}", ns);
+                        Some(quote!(super::#namespace_ident::))
+                    } else {
+                        None
+                    };
+                    quote! {
+                        pub fn #read_method_ident<F>(self, f: F) -> Result<#next_type<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>>
+                            where F: FnOnce(#struct_ns_prefix#field_struct_read_ready<'a, R>) -> Result<#struct_ns_prefix#field_struct_read_done<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>>
+                        {
+                            let ready = #struct_ns_prefix#field_struct_read_ready {
+                                reader: self.reader,
+                            };
+                            let done = f(ready)?;
+                            Ok(#next_type {
+                                reader: done.reader,
+                            })
+                        }
                     }
                 }
-            };
-
-            let read_fn = match f.ty {
-                Type::Primitive(PrimitiveType::String) => quote! {
-                    pub fn #read_method_ident(self) -> Result<(&'a #rust_field_type, #next_type<'a, R>), rust_lcm_codec::DecodeValueError<R::Error>> {
-                        let s = unsafe { core::mem::transmute(rust_lcm_codec::read_str_value(self.reader)?) };
-                        Ok((s, #next_state))
-                    }
-                },
-                Type::Primitive(_) => quote! {
-                    pub fn #read_method_ident(self) -> Result<(#rust_field_type, #next_type<'a, R>), rust_lcm_codec::DecodeValueError<R::Error>> {
-                        use rust_lcm_codec::SerializeValue;
-                        let v = SerializeValue::read_new_value(self.reader)?;
-                        Ok((v, #next_state))
-                    }
-
-                    pub fn #read_method_ident_mut(self, val: &mut #rust_field_type) -> Result<#next_type<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>> {
-                        use rust_lcm_codec::SerializeValue;
-                        val.read_value(self.reader)?;
-                        Ok(#next_state)
-                    }
-                },
                 Type::Array(_) => unimplemented!(),
-                Type::Struct(_) => unimplemented!(),
             };
 
             quote! {
                 impl<'a, R: rust_lcm_codec::StreamingReader> #start_type<'a, R> {
 
                     #[inline(always)]
-                    #read_fn
+                    #read_methods
                 }
             }
         }

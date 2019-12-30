@@ -1,0 +1,18 @@
+package nested;
+
+struct local_nested_t {
+    byte j;
+    local_primitive_t k;
+    byte p;
+}
+
+struct local_primitive_t {
+    byte m;
+    byte n;
+}
+
+struct remote_nested_t {
+    byte j;
+    temperature.temperature_t k;
+    byte p;
+}

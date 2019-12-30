@@ -58,12 +58,12 @@ fn prim_test_read_to_field() -> Result<(), TestError> {
     let mut bool_field = bool::default();
     let mut byte_field = u8::default();
     let (string_field, bool_reader) = pr
-        .read_int8_field_mut(&mut int8_field)?
-        .read_int16_field_mut(&mut int16_field)?
-        .read_int32_field_mut(&mut int32_field)?
-        .read_int64_field_mut(&mut int64_field)?
-        .read_float_field_mut(&mut float_field)?
-        .read_double_field_mut(&mut double_field)?
+        .read_int8_field_into(&mut int8_field)?
+        .read_int16_field_into(&mut int16_field)?
+        .read_int32_field_into(&mut int32_field)?
+        .read_int64_field_into(&mut int64_field)?
+        .read_float_field_into(&mut float_field)?
+        .read_double_field_into(&mut double_field)?
         .read_string_field()?;
     assert_eq!(1, int8_field);
     assert_eq!(2, int16_field);
@@ -74,8 +74,8 @@ fn prim_test_read_to_field() -> Result<(), TestError> {
     assert_eq!("seven", string_field);
 
     bool_reader
-        .read_bool_field_mut(&mut bool_field)?
-        .read_byte_field_mut(&mut byte_field)?;
+        .read_bool_field_into(&mut bool_field)?
+        .read_byte_field_into(&mut byte_field)?;
     assert_eq!(true, bool_field);
     assert_eq!(8, byte_field);
     Ok(())
@@ -121,3 +121,5 @@ fn prim_test_read_direct() -> Result<(), TestError> {
     assert_eq!(8, byte_field);
     Ok(())
 }
+
+// TODO - test writer error piping

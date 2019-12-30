@@ -10,7 +10,11 @@ fn main() {
     println!("cargo:rerun-if-changed=../../../rust-lcm-codegen");
 
     // TODO all the schema files
-    let schema_files = vec!["../schemas/primitives.lcm"];
+    let schema_files = vec![
+        "../schemas/primitives.lcm",
+        "../schemas/nested.lcm",
+        "../schemas/temperature.lcm",
+    ];
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR");
     let out_path = Path::join(Path::new(&out_dir), "lcm.rs");
 
