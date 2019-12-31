@@ -14,6 +14,7 @@ fn main() {
         "../schemas/primitives.lcm",
         "../schemas/nested.lcm",
         "../schemas/temperature.lcm",
+        "../schemas/single_dimension_list.lcm",
     ];
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR");
     let out_path = Path::join(Path::new(&out_dir), "lcm.rs");

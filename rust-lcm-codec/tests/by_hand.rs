@@ -63,6 +63,13 @@ fn test_point2d_write() {
 //     int32_t vals[count][2];
 //     int32_t post;
 // }
+
+// Simplified single dimensional case
+// struct with_array {
+//     int32_t count;
+//     int32_t vals[count];
+//     int32_t post;
+// }
 const WITHARRAY_SCHEMA_HASH: u64 = 0xaa00aa00aa00aa00;
 
 struct WithArray();
@@ -71,8 +78,8 @@ struct WithArray_Write_READY<'a, W: StreamingWriter> {
 }
 struct WithArray_Write_vals<'a, W: StreamingWriter> {
     writer: &'a mut W,
-    array_dims: [u64; 2],
-    array_cursor: [u64; 2],
+    expected_count: usize,
+    current_count: usize,
 }
 struct WithArray_Write_post<'a, W: StreamingWriter> {
     writer: &'a mut W,
@@ -95,36 +102,55 @@ impl<'a, W: StreamingWriter> WithArray_Write_READY<'a, W> {
         self.writer.write_bytes(&count.to_be_bytes())?;
         Ok(WithArray_Write_vals {
             writer: self.writer,
-            array_dims: [count as _, 2], // TODO when does 2 come in here?
-            array_cursor: [0, 0],
+            expected_count: count as _,
+            current_count: 0,
         })
     }
 }
 
-impl<'a, W: StreamingWriter> WithArray_Write_vals<'a, W> {
-    fn write_vals_item(mut self, item: i32) -> Result<Self, W::Error> {
-        assert!(self.array_cursor[0] < self.array_dims[0]);
-        assert!(self.array_cursor[1] < self.array_dims[1]);
-
-        self.writer.write_bytes(&item.to_be_bytes())?;
-
-        self.array_cursor[1] += 1;
-        if self.array_cursor[1] >= self.array_dims[1] {
-            self.array_cursor[0] += 1;
-            self.array_cursor[1] = 0;
+impl<'a, W: StreamingWriter> Iterator for WithArray_Write_vals<'a, W> {
+    type Item = WithArray_Write_vals_Item<'a, W>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_count < self.expected_count {
+            unsafe {
+                Some(WithArray_Write_vals_Item {
+                    parent: core::mem::transmute(self),
+                })
+            }
+        } else {
+            None
         }
-
-        Ok(self)
     }
+}
 
-    fn write_vals_done(self) -> Result<WithArray_Write_post<'a, W>, W::Error> {
-        // TODO note that we have to do this check at runtime
-        assert_eq!(self.array_cursor[0], self.array_dims[0]);
-        assert_eq!(self.array_cursor[1], 0);
-
+impl<'a, W: StreamingWriter> WithArray_Write_vals<'a, W> {
+    fn done(self) -> Result<WithArray_Write_post<'a, W>, EncodeValueError<W::Error>> {
+        if self.current_count < self.expected_count {
+            return Err(EncodeValueError::ArrayLengthMismatch(
+                "vals len mismatch when done called",
+            ));
+        }
         Ok(WithArray_Write_post {
             writer: self.writer,
         })
+    }
+}
+
+pub struct WithArray_Write_vals_Item<'a, W: StreamingWriter> {
+    parent: &'a mut WithArray_Write_vals<'a, W>,
+}
+
+impl<'a, W: StreamingWriter> WithArray_Write_vals_Item<'a, W> {
+    // for the primitive case, directly write
+    fn write_item(self, val: &u8) -> Result<(), EncodeValueError<W::Error>> {
+        if self.parent.current_count >= self.parent.expected_count {
+            return Err(EncodeValueError::ArrayLengthMismatch(
+                "vals item len mismatch",
+            ));
+        }
+        self.parent.writer.write_bytes(&(*val).to_be_bytes())?;
+        self.parent.current_count += 1;
+        Ok(())
     }
 }
 
@@ -144,14 +170,29 @@ fn test_witharray_write() {
 
     let aw = WithArray::begin_write(&mut w).unwrap();
     let mut aw = aw.write_count(10).unwrap();
-    for i in 0..10 {
-        for j in 0..2 {
-            aw = aw.write_vals_item(i + j).unwrap();
-        }
+    for (i, item_writer) in (&mut aw).enumerate() {
+        let i = i as u8;
+        item_writer.write_item(&i).unwrap();
     }
-    let aw = aw.write_vals_done().unwrap();
+    let aw = aw.done().unwrap();
     let _aw = aw.write_post(2).unwrap();
 }
+
+//#[test]
+//fn test_witharray_write() {
+//    let mut buf = [0u8; 256];
+//    let mut w = BufferWriter::new(&mut buf);
+//
+//    let aw = WithArray::begin_write(&mut w).unwrap();
+//    let mut aw = aw.write_count(10).unwrap();
+//    for i in 0..10 {
+//        for j in 0..2 {
+//            aw = aw.write_vals_item(i + j).unwrap();
+//        }
+//    }
+//    let aw = aw.write_vals_done().unwrap();
+//    let _aw = aw.write_post(2).unwrap();
+//}
 
 // struct nested {
 //     int32_t a;

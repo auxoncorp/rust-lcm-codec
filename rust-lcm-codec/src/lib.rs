@@ -22,6 +22,19 @@ impl<E> From<E> for DecodeValueError<E> {
     }
 }
 
+#[derive(Debug)]
+pub enum EncodeValueError<E> {
+    ArrayLengthMismatch(&'static str),
+    InvalidValue(&'static str),
+    WriterError(E),
+}
+
+impl<E> From<E> for EncodeValueError<E> {
+    fn from(e: E) -> Self {
+        EncodeValueError::WriterError(e)
+    }
+}
+
 /// Reader backend trait
 pub trait StreamingReader {
     type Error;

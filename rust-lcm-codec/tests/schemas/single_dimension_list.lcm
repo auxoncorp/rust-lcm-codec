@@ -1,0 +1,19 @@
+package single_dimension_list;
+
+struct point_list_t
+{
+    int32_t npoints;
+    double  points[npoints];
+}
+
+struct pair_t
+{
+    int32_t left;
+    int32_t right;
+}
+
+struct struct_list_t
+{
+    int32_t npoints;
+    pair_t points[npoints];
+}

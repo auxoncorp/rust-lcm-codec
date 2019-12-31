@@ -4,7 +4,7 @@
 pub mod fingerprint;
 pub mod parser;
 
-use crate::parser::{PrimitiveType, Type};
+use crate::parser::{ArrayDimension, ArrayType, PrimitiveType, StructType, Type};
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use std::fs::File;
@@ -83,23 +83,80 @@ fn emit_schema(schema: &parser::Schema, env: &fingerprint::Environment) -> Token
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum StateName {
+    Ready,
+    HandlingField(String),
+    Done,
+}
+
+impl StateName {
+    fn name(&self) -> &str {
+        match self {
+            StateName::Ready => STATE_NAME_READY,
+            StateName::HandlingField(s) => s.as_str(),
+            StateName::Done => STATE_NAME_DONE,
+        }
+    }
+}
+
+#[derive(Debug)]
 struct WriterState {
-    state_name: String,
+    state_name: StateName,
     /// The name of the LCM struct this state is for
     struct_name: String,
-    /// field that's written when transitioning out of this state
-    field: Option<parser::Field>,
+    /// field that's written when transitioning out of this state,
+    /// and whether that value needs to be captured for use in
+    /// tracking the length of an array
+    field: Option<(parser::Field, bool)>,
+    /// The array-length values that this state needs to pass along to
+    /// future states for the purposes of correctly sizing arrays,
+    /// identified by the name of the field they serve
+    baggage_dimensions: Vec<BaggageDimension>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct BaggageDimension {
+    array_field_name: String,
+    len_field_name: String,
+    dimension_depth: usize,
+}
+
+impl BaggageDimension {
+    fn as_field_declarations(baggage_dimensions: &[BaggageDimension]) -> Vec<TokenStream> {
+        baggage_dimensions
+            .iter()
+            .map(|d| {
+                let field_ident = format_ident!("baggage_{}", d.len_field_name);
+                quote!(#field_ident: usize,)
+            })
+            .collect()
+    }
+    fn as_field_initializations_from_self<'a>(
+        baggage_dimensions: impl IntoIterator<Item = &'a BaggageDimension>,
+    ) -> Vec<TokenStream> {
+        baggage_dimensions
+            .into_iter()
+            .map(|d| {
+                let baggage_field_ident = format_ident!("baggage_{}", d.len_field_name);
+                quote!(#baggage_field_ident: self.#baggage_field_ident)
+            })
+            .collect()
+    }
 }
 
 impl WriterState {
+    fn struct_state_decl_ident(struct_name: &str, state_name: &StateName) -> Ident {
+        format_ident!("{}_Write_{}", struct_name, state_name.name())
+    }
     fn ident(&self) -> Ident {
-        format_ident!("{}_Write_{}", self.struct_name, self.state_name)
+        WriterState::struct_state_decl_ident(&self.struct_name, &self.state_name)
     }
 }
 
 // TODO - see if we can / ought to collapse WriterState and ReaderState
 struct ReaderState {
-    state_name: String,
+    state_name: StateName,
     /// The name of the LCM struct this state is for
     struct_name: String,
     /// field that's read when transitioning out of this state
@@ -107,52 +164,20 @@ struct ReaderState {
 }
 
 impl ReaderState {
+    fn struct_state_decl_ident(struct_name: &str, state_name: &StateName) -> Ident {
+        format_ident!("{}_Read_{}", struct_name, state_name.name())
+    }
     fn ident(&self) -> Ident {
-        format_ident!("{}_Read_{}", self.struct_name, self.state_name)
+        ReaderState::struct_state_decl_ident(&self.struct_name, &self.state_name)
     }
 }
 
 fn emit_struct(s: &parser::Struct, env: &fingerprint::Environment) -> TokenStream {
     let schema_hash_ident = format_ident!("{}_SCHEMA_HASH", s.name.to_uppercase());
     let schema_hash = fingerprint::struct_hash(&s, &env);
-
-    let mut writer_states = vec![];
-    let mut reader_states = vec![];
-
-    for (i, member) in s.members.iter().enumerate() {
-        if let parser::StructMember::Field(f) = member {
-            writer_states.push(WriterState {
-                state_name: if i == 0 {
-                    STATE_NAME_READY.to_string()
-                } else {
-                    f.name.to_owned()
-                },
-                struct_name: s.name.clone(),
-                field: Some(f.clone()),
-            });
-            reader_states.push(ReaderState {
-                state_name: if i == 0 {
-                    STATE_NAME_READY.to_string()
-                } else {
-                    f.name.to_owned()
-                },
-                struct_name: s.name.clone(),
-                field: Some(f.clone()),
-            });
-        }
-    }
-
-    writer_states.push(WriterState {
-        state_name: STATE_NAME_DONE.to_string(),
-        struct_name: s.name.clone(),
-        field: None,
-    });
-
-    reader_states.push(ReaderState {
-        state_name: STATE_NAME_DONE.to_string(),
-        struct_name: s.name.clone(),
-        field: None,
-    });
+    let (writer_states, reader_states) = gather_states(s);
+    eprintln!("----- {} ---- ", s.name);
+    eprintln!("Writer states look like: {:#?}", writer_states);
 
     let writer_states_decl_code = writer_states
         .iter()
@@ -233,24 +258,141 @@ fn emit_struct(s: &parser::Struct, env: &fingerprint::Environment) -> TokenStrea
     }
 }
 
+fn gather_states(s: &parser::Struct) -> (Vec<WriterState>, Vec<ReaderState>) {
+    let mut writer_states = Vec::new();
+    let mut reader_states = Vec::new();
+
+    writer_states.insert(
+        0,
+        WriterState {
+            state_name: StateName::Done,
+            struct_name: s.name.clone(),
+            field: None,
+            baggage_dimensions: Vec::with_capacity(0),
+        },
+    );
+
+    reader_states.insert(
+        0,
+        ReaderState {
+            state_name: StateName::Done,
+            struct_name: s.name.clone(),
+            field: None,
+        },
+    );
+
+    // Iterate backwards to collect and manage required dimensional metadata
+    // Note that the current approach does not handle multidimensional arrays
+    let mut baggage_dimensions = Vec::new();
+    for (i, member) in s.members.iter().enumerate().rev() {
+        if let parser::StructMember::Field(f) = member {
+            let mut local_dynamic_dimensions = vec![];
+            if let Type::Array(at) = &f.ty {
+                for (depth, dim) in at.dimensions.iter().enumerate() {
+                    if let ArrayDimension::Dynamic { field_name } = dim {
+                        local_dynamic_dimensions.push(BaggageDimension {
+                            array_field_name: f.name.clone(),
+                            len_field_name: field_name.clone(),
+                            dimension_depth: depth,
+                        })
+                    }
+                }
+            }
+            baggage_dimensions.extend(local_dynamic_dimensions.clone());
+            if local_dynamic_dimensions.len() > 1 {
+                panic!("Arrays with more than one dimension are not yet supported");
+            }
+            let mut field_serves_as_dimension = false;
+            while let Some(bi) = baggage_dimensions
+                .iter()
+                .position(|dim| dim.len_field_name == f.name.as_str())
+            {
+                // This dimension will be discharged by the transition out of this state, no need to
+                // keep tracking it
+                let bd = baggage_dimensions.remove(bi);
+                field_serves_as_dimension = true;
+                eprintln!(
+                    "Removing {:?} after inserting state for field {}",
+                    bd,
+                    f.name.as_str()
+                );
+            }
+            writer_states.insert(
+                0,
+                WriterState {
+                    state_name: if i == 0 {
+                        StateName::Ready
+                    } else {
+                        StateName::HandlingField(f.name.to_owned())
+                    },
+                    struct_name: s.name.clone(),
+                    field: Some((f.clone(), field_serves_as_dimension)),
+                    baggage_dimensions: baggage_dimensions.clone(),
+                },
+            );
+            reader_states.insert(
+                0,
+                ReaderState {
+                    state_name: if i == 0 {
+                        StateName::Ready
+                    } else {
+                        StateName::HandlingField(f.name.to_owned())
+                    },
+                    struct_name: s.name.clone(),
+                    field: Some(f.clone()),
+                },
+            );
+        }
+    }
+    (writer_states, reader_states)
+}
+
 fn emit_writer_state_decl(ws: &WriterState, env: &fingerprint::Environment) -> TokenStream {
     let struct_ident = ws.ident();
-    let allow_dead = if ws.state_name == STATE_NAME_DONE {
+    let allow_dead = if ws.state_name == StateName::Done {
         Some(quote!(#[allow(dead_code)]))
     } else {
         None
+    };
+    let dimensions_fields = BaggageDimension::as_field_declarations(&ws.baggage_dimensions);
+    let (current_iter_count_field, array_item_writer_decl) = if let Some((
+        parser::Field {
+            ty: parser::Type::Array(at),
+            name,
+        },
+        _,
+    )) = &ws.field
+    {
+        let current_count_field_ident = array_current_count_field_ident(name.as_str(), 0, at)
+            .expect("Arrays must have at least one dimension");
+        let item_writer_struct_ident = format_ident!("{}_Item", struct_ident);
+        let array_item_writer_decl = quote! {
+            pub struct #item_writer_struct_ident<'a, W: rust_lcm_codec::StreamingWriter> {
+                parent: &'a mut #struct_ident<'a, W>,
+            }
+        };
+        (
+            Some(quote!(#current_count_field_ident: usize, )),
+            Some(array_item_writer_decl),
+        )
+    } else {
+        (None, None)
     };
     quote! {
         pub struct #struct_ident<'a, W: rust_lcm_codec::StreamingWriter> {
             #allow_dead
             pub(super) writer: &'a mut W,
+            #current_iter_count_field
+            #( #dimensions_fields )*
         }
+
+        #array_item_writer_decl
     }
 }
 
 fn emit_reader_state_decl(rs: &ReaderState, env: &fingerprint::Environment) -> TokenStream {
     let struct_ident = rs.ident();
-    let allow_dead = if rs.state_name == STATE_NAME_DONE {
+    let allow_dead = if rs.state_name == StateName::Done {
         Some(quote!(#[allow(dead_code)]))
     } else {
         None
@@ -283,75 +425,340 @@ fn emit_writer_state_transition(
     env: &fingerprint::Environment,
 ) -> TokenStream {
     match ws.field {
-        Some(ref f) => {
+        Some((ref f, serves_as_dimension)) => {
             let start_type = ws.ident();
             let next_type = ws_next.ident();
             let write_method_ident = format_ident!("write_{}", f.name);
-            let write_method = match &f.ty {
-                parser::Type::Primitive(pt) => {
-                    let rust_field_type = format_ident!("{}", primitive_type_to_rust(&pt));
-                    let write_invocation = match pt {
-                        PrimitiveType::String => quote! {
-                            rust_lcm_codec::write_str_value(val, self.writer)?;
-                        },
-                        _ => quote! {
-                            use rust_lcm_codec::SerializeValue;
-                            val.write_value(self.writer)?;
-                        },
-                    };
-                    quote! {
-                        pub fn #write_method_ident(self, val: & #rust_field_type) -> Result<#next_type<'a, W>, W::Error> {
-                            #write_invocation
-                            Ok(#next_type {
-                                writer: self.writer,
-                            })
-                        }
-                    }
-                }
-                parser::Type::Struct(st) => {
-                    let field_struct_write_ready: Ident = WriterState {
-                        state_name: STATE_NAME_READY.to_string(),
-                        struct_name: st.name.clone(),
-                        field: None,
-                    }
-                    .ident();
-                    let field_struct_write_done: Ident = WriterState {
-                        state_name: STATE_NAME_DONE.to_string(),
-                        struct_name: st.name.clone(),
-                        field: None,
-                    }
-                    .ident();
-                    let struct_ns_prefix = if let Some(ns) = &st.namespace {
-                        let namespace_ident = format_ident!("{}", ns);
-                        Some(quote!(super::#namespace_ident::))
-                    } else {
-                        None
-                    };
-                    quote! {
-                        pub fn #write_method_ident<F>(self, f: F) -> Result<#next_type<'a, W>, W::Error>
-                            where F: FnOnce(#struct_ns_prefix#field_struct_write_ready<'a, W>) -> Result<#struct_ns_prefix#field_struct_write_done<'a, W>, W::Error>
-                        {
-                            let ready = #struct_ns_prefix#field_struct_write_ready {
-                                writer: self.writer,
-                            };
-                            let done = f(ready)?;
-                            Ok(#next_type {
-                                writer: done.writer,
-                            })
-                        }
-                    }
-                }
-                _ => unimplemented!(),
-            };
-
-            quote! {
-                impl<'a, W: rust_lcm_codec::StreamingWriter> #start_type<'a, W> {
-                    #[inline(always)]
-                    #write_method
-                }
+            match &f.ty {
+                parser::Type::Primitive(pt) => emit_writer_field_state_transition_primitive(
+                    start_type,
+                    ws_next,
+                    f.name.as_str(),
+                    pt,
+                    serves_as_dimension,
+                ),
+                parser::Type::Struct(st) => emit_writer_field_state_transition_struct(
+                    start_type,
+                    ws_next,
+                    f.name.as_str(),
+                    st,
+                ),
+                parser::Type::Array(at) => emit_writer_field_state_transition_array(
+                    start_type,
+                    ws_next,
+                    f.name.as_str(),
+                    at,
+                ),
             }
         }
         None => quote! {},
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+enum WriterPath {
+    Bare,
+    ViaSelf,
+    ViaSelfParent,
+}
+
+impl WriterPath {
+    fn path(self) -> TokenStream {
+        match self {
+            WriterPath::Bare => quote!(writer),
+            WriterPath::ViaSelf => quote!(self.writer),
+            WriterPath::ViaSelfParent => quote!(self.parent.writer),
+        }
+    }
+}
+fn emit_write_primitive_invocation(pt: &PrimitiveType, writer_path: WriterPath) -> TokenStream {
+    let path = writer_path.path();
+    match pt {
+        PrimitiveType::String => quote! {
+            rust_lcm_codec::write_str_value(val, #path)?;
+        },
+        _ => quote! {
+            use rust_lcm_codec::SerializeValue;
+            val.write_value(#path)?;
+        },
+    }
+}
+
+fn emit_writer_field_state_transition_primitive(
+    start_type: Ident,
+    next_state: &WriterState,
+    field_name: &str,
+    pt: &PrimitiveType,
+    field_serves_as_dimension: bool,
+) -> TokenStream {
+    let write_method_ident = format_ident!("write_{}", field_name);
+    let write_method = {
+        let rust_field_type = format_ident!("{}", primitive_type_to_rust(&pt));
+        let write_invocation = emit_write_primitive_invocation(pt, WriterPath::ViaSelf);
+        let dimensional_capture = if field_serves_as_dimension {
+            let baggage_field_ident = format_ident!("baggage_{}", field_name);
+            Some(quote!(#baggage_field_ident: (*val) as usize,))
+        } else {
+            None
+        };
+        let next_type = next_state.ident();
+        let next_dimensions_fields = BaggageDimension::as_field_initializations_from_self(
+            next_state
+                .baggage_dimensions
+                .iter()
+                .filter(|d| !field_serves_as_dimension || d.len_field_name.as_str() != field_name),
+        );
+        let current_iter_count_initialization = if let Some((
+            parser::Field {
+                ty: parser::Type::Array(at),
+                name,
+            },
+            _,
+        )) = &next_state.field
+        {
+            let current_iter_count_field_ident =
+                array_current_count_field_ident(name.as_str(), 0, at)
+                    .expect("Arrays must have at least one dimension");
+            Some(quote!(#current_iter_count_field_ident: 0, ))
+        } else {
+            None
+        };
+        quote! {
+            pub fn #write_method_ident(self, val: & #rust_field_type) -> Result<#next_type<'a, W>, W::Error> {
+                #write_invocation
+                Ok(#next_type {
+                    writer: self.writer,
+                    #dimensional_capture
+                    #current_iter_count_initialization
+                    #( #next_dimensions_fields )*
+                })
+            }
+        }
+    };
+
+    quote! {
+        impl<'a, W: rust_lcm_codec::StreamingWriter> #start_type<'a, W> {
+            #[inline(always)]
+            #write_method
+        }
+    }
+}
+
+fn emit_write_struct_method(
+    st: &StructType,
+    write_method_ident: Ident,
+    pre_field_write: Option<TokenStream>,
+    post_field_write: Option<TokenStream>,
+    after_field_type: TokenStream,
+    after_field_constructor: TokenStream,
+    writer_path: WriterPath,
+) -> TokenStream {
+    let field_struct_write_ready: Ident =
+        WriterState::struct_state_decl_ident(&st.name, &StateName::Ready);
+    let field_struct_write_done: Ident =
+        WriterState::struct_state_decl_ident(&st.name, &StateName::Done);
+    let struct_ns_prefix = if let Some(ns) = &st.namespace {
+        let namespace_ident = format_ident!("{}", ns);
+        Some(quote!(super::#namespace_ident::))
+    } else {
+        None
+    };
+    let writer_path_tokens = writer_path.path();
+    quote! {
+        pub fn #write_method_ident<F>(self, f: F) -> Result<#after_field_type, rust_lcm_codec::EncodeValueError<W::Error>>
+            where F: FnOnce(#struct_ns_prefix#field_struct_write_ready<'a, W>)
+                -> Result<#struct_ns_prefix#field_struct_write_done<'a, W>, rust_lcm_codec::EncodeValueError<W::Error>>
+        {
+            #pre_field_write
+            let ready = #struct_ns_prefix#field_struct_write_ready {
+                writer: #writer_path_tokens,
+            };
+            let done = f(ready)?;
+            #post_field_write
+            Ok(#after_field_constructor)
+        }
+    }
+}
+
+fn emit_writer_field_state_transition_struct(
+    start_type: Ident,
+    next_state: &WriterState,
+    field_name: &str,
+    st: &StructType,
+) -> TokenStream {
+    let next_type = next_state.ident();
+    let write_method_ident = format_ident!("write_{}", field_name);
+    let after_field_type = quote!(#next_type<'a, W>);
+
+    let next_dimensions_fields =
+        BaggageDimension::as_field_initializations_from_self(&next_state.baggage_dimensions);
+    let after_field_constructor = quote! {
+                #next_type {
+                    writer: done.writer,
+                    #( #next_dimensions_fields )*
+                }
+    };
+    let write_method = emit_write_struct_method(
+        st,
+        write_method_ident,
+        None,
+        None,
+        after_field_type,
+        after_field_constructor,
+        WriterPath::ViaSelf,
+    );
+    quote! {
+        impl<'a, W: rust_lcm_codec::StreamingWriter> #start_type<'a, W> {
+            #[inline(always)]
+            #write_method
+        }
+    }
+}
+
+fn array_current_count_field_ident(
+    array_field_name: &str,
+    index: usize,
+    array_type: &ArrayType,
+) -> Option<Ident> {
+    match &array_type.dimensions.get(index) {
+        Some(ArrayDimension::Static { size }) => {
+            // Use the field_name of the array
+            Some(format_ident!("current_{}_count", array_field_name))
+        }
+        Some(ArrayDimension::Dynamic { field_name }) => {
+            // Use the field_name of the field supplying the dynamic array length
+            Some(format_ident!("current_{}_count", field_name))
+        }
+        None => None,
+    }
+}
+fn array_current_count_under_expected_check(
+    array_field_name: &str,
+    index: usize,
+    array_type: &ArrayType,
+    use_parent: bool,
+) -> Option<TokenStream> {
+    let current_count_ident = array_current_count_field_ident(array_field_name, index, array_type)?;
+    let path_prefix = if use_parent {
+        quote!(self.parent)
+    } else {
+        quote!(self)
+    };
+    match array_type.dimensions.get(index) {
+        Some(ArrayDimension::Static { size }) => {
+            Some(quote!(#path_prefix.#current_count_ident == #size))
+        }
+        Some(ArrayDimension::Dynamic { field_name }) => {
+            let expected_count_ident = format_ident!("baggage_{}", field_name);
+            Some(quote!(#path_prefix.#current_count_ident < #path_prefix.#expected_count_ident))
+        }
+        None => None,
+    }
+}
+
+/// The goal here is to make this current state implement an Iterator
+/// which returns a number items equal to the previously-written size
+/// of this array. The items produced by the iterator are single-shot
+/// "ItemWriter" instances that exist to facilitate writing a single
+/// value.
+///
+/// After the Iterator has been exhausted, the user is expected to
+/// call `done` on this state instance to consume it and move on.
+fn emit_writer_field_state_transition_array(
+    start_type: Ident,
+    next_state: &WriterState,
+    field_name: &str,
+    at: &ArrayType,
+) -> TokenStream {
+    let current_count_ident = array_current_count_field_ident(field_name, 0, at)
+        .expect("Arrays should have at least one dimension");
+    let next_type = next_state.ident();
+    let next_dimensions_fields =
+        BaggageDimension::as_field_initializations_from_self(&next_state.baggage_dimensions);
+    let item_writer_struct_ident = format_ident!("{}_Item", start_type);
+    let write_item_method_ident = format_ident!("write");
+
+    let item_writer_under_len_check =
+        array_current_count_under_expected_check(field_name, 0, at, true)
+            .expect("Arrays should have at least one dimension");
+    let pre_field_write = Some(quote! {
+        if !(#item_writer_under_len_check) {
+            Err(rust_lcm_codec::EncodeValueError::ArrayLengthMismatch(
+                "array length mismatch discovered when `done` called",
+            ))?;
+        }
+    });
+    let post_field_write = Some(quote! {
+        self.parent.#current_count_ident += 1;
+    });
+    let write_item_method = match &*at.item_type {
+        Type::Primitive(pt) => {
+            let rust_field_type = Some(format_ident!("{}", primitive_type_to_rust(&pt)));
+            let write_invocation = emit_write_primitive_invocation(pt, WriterPath::ViaSelfParent);
+            quote! {
+                pub fn #write_item_method_ident(self, val: & #rust_field_type) -> Result<(), rust_lcm_codec::EncodeValueError<W::Error>> {
+                    #pre_field_write
+                    #write_invocation
+                    #post_field_write
+                    Ok(())
+                }
+            }
+        }
+        Type::Struct(st) => {
+            let after_field_type = quote!(()); // unit
+            let after_field_constructor = quote!(()); // unit instantiation looks like its typedef
+            emit_write_struct_method(
+                st,
+                write_item_method_ident,
+                pre_field_write,
+                post_field_write,
+                after_field_type,
+                after_field_constructor,
+                WriterPath::ViaSelfParent,
+            )
+        }
+        Type::Array(at) => panic!("Multidimensional arrays are not supported yet."),
+    };
+
+    let top_level_under_len_check =
+        array_current_count_under_expected_check(field_name, 0, at, false)
+            .expect("Arrays should have at least one dimension");
+    // TODO - create location-specific error message for array length mismatch
+    quote! {
+
+        impl<'a, W: rust_lcm_codec::StreamingWriter> Iterator for #start_type<'a, W> {
+            type Item = #item_writer_struct_ident<'a, W>;
+            fn next(&mut self) -> Option<Self::Item> {
+                if #top_level_under_len_check {
+                    unsafe {
+                        Some(#item_writer_struct_ident {
+                            parent: core::mem::transmute(self),
+                        })
+                    }
+                } else {
+                    None
+                }
+            }
+        }
+        impl<'a, W: rust_lcm_codec::StreamingWriter> #item_writer_struct_ident<'a, W> {
+            #[inline(always)]
+            #write_item_method
+        }
+        impl<'a, W: rust_lcm_codec::StreamingWriter> #start_type<'a, W> {
+            #[inline(always)]
+            pub fn done(self) -> Result<#next_type<'a, W>, rust_lcm_codec::EncodeValueError<W::Error>> {
+                if #top_level_under_len_check {
+                    Err(rust_lcm_codec::EncodeValueError::ArrayLengthMismatch(
+                        "array length mismatch discovered when `done` called",
+                    ))
+                } else {
+                    Ok(#next_type {
+                        writer: self.writer,
+                        #( #next_dimensions_fields )*
+                    })
+                }
+            }
+        }
     }
 }
 
@@ -398,19 +805,10 @@ fn emit_reader_state_transition(
                     }
                 }
                 Type::Struct(st) => {
-                    // TODO - incorporate namespace
-                    let field_struct_read_ready: Ident = ReaderState {
-                        state_name: STATE_NAME_READY.to_string(),
-                        struct_name: st.name.clone(),
-                        field: None,
-                    }
-                    .ident();
-                    let field_struct_read_done: Ident = ReaderState {
-                        state_name: STATE_NAME_DONE.to_string(),
-                        struct_name: st.name.clone(),
-                        field: None,
-                    }
-                    .ident();
+                    let field_struct_read_ready: Ident =
+                        ReaderState::struct_state_decl_ident(&st.name, &StateName::Ready);
+                    let field_struct_read_done: Ident =
+                        ReaderState::struct_state_decl_ident(&st.name, &StateName::Done);
                     let struct_ns_prefix = if let Some(ns) = &st.namespace {
                         let namespace_ident = format_ident!("{}", ns);
                         Some(quote!(super::#namespace_ident::))
@@ -431,7 +829,10 @@ fn emit_reader_state_transition(
                         }
                     }
                 }
-                Type::Array(_) => unimplemented!(),
+                Type::Array(_) => {
+                    // TODO !
+                    quote!(pub fn #read_method_ident(self) { unimplemented!() })
+                }
             };
 
             quote! {

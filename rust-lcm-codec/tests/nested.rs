@@ -10,6 +10,7 @@ enum TestError {
         rust_lcm_codec::DecodeFingerprintError<rust_lcm_codec::BufferReaderError>,
     ),
     DecodeValueError(rust_lcm_codec::DecodeValueError<rust_lcm_codec::BufferReaderError>),
+    EncodeValueError(rust_lcm_codec::EncodeValueError<rust_lcm_codec::BufferWriterError>),
 }
 
 impl From<rust_lcm_codec::BufferWriterError> for TestError {
@@ -30,6 +31,12 @@ impl From<rust_lcm_codec::DecodeValueError<rust_lcm_codec::BufferReaderError>> f
     }
 }
 
+impl From<rust_lcm_codec::EncodeValueError<rust_lcm_codec::BufferWriterError>> for TestError {
+    fn from(e: rust_lcm_codec::EncodeValueError<rust_lcm_codec::BufferWriterError>) -> Self {
+        TestError::EncodeValueError(e)
+    }
+}
+
 #[test]
 fn nested_round_trip_happy_path() -> Result<(), TestError> {
     let mut buf = [0u8; 256];
@@ -39,7 +46,7 @@ fn nested_round_trip_happy_path() -> Result<(), TestError> {
         let _write_done: generated::nested::local_nested_t_Write_DONE<_> = pw
             .write_j(&1)?
             .write_k(|local_primitive_write_ready| {
-                local_primitive_write_ready.write_m(&2)?.write_n(&3)
+                Ok(local_primitive_write_ready.write_m(&2)?.write_n(&3)?)
             })?
             .write_p(&4)?;
     }
@@ -73,9 +80,9 @@ fn nested_remote_package_field_round_trip_happy_path() -> Result<(), TestError> 
         let _write_done: generated::nested::remote_nested_t_Write_DONE<_> = pw
             .write_j(&1)?
             .write_k(|local_primitive_write_ready| {
-                local_primitive_write_ready
+                Ok(local_primitive_write_ready
                     .write_utime(&2)?
-                    .write_degCelsius(&3.0)
+                    .write_degCelsius(&3.0)?)
             })?
             .write_p(&4)?;
     }
