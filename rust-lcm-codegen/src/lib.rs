@@ -484,6 +484,25 @@ fn emit_write_primitive_invocation(pt: &PrimitiveType, writer_path: WriterPath) 
     }
 }
 
+fn emit_writer_next_field_current_iter_count_initialization(
+    next_state: &WriterState,
+) -> Option<TokenStream> {
+    if let Some((
+        parser::Field {
+            ty: parser::Type::Array(at),
+            name,
+        },
+        _,
+    )) = &next_state.field
+    {
+        let current_iter_count_field_ident = array_current_count_field_ident(name.as_str(), 0, at)
+            .expect("Arrays must have at least one dimension");
+        Some(quote!(#current_iter_count_field_ident: 0, ))
+    } else {
+        None
+    }
+}
+
 fn emit_writer_field_state_transition_primitive(
     start_type: Ident,
     next_state: &WriterState,
@@ -508,21 +527,8 @@ fn emit_writer_field_state_transition_primitive(
                 .iter()
                 .filter(|d| !field_serves_as_dimension || d.len_field_name.as_str() != field_name),
         );
-        let current_iter_count_initialization = if let Some((
-            parser::Field {
-                ty: parser::Type::Array(at),
-                name,
-            },
-            _,
-        )) = &next_state.field
-        {
-            let current_iter_count_field_ident =
-                array_current_count_field_ident(name.as_str(), 0, at)
-                    .expect("Arrays must have at least one dimension");
-            Some(quote!(#current_iter_count_field_ident: 0, ))
-        } else {
-            None
-        };
+        let current_iter_count_initialization =
+            emit_writer_next_field_current_iter_count_initialization(next_state);
         quote! {
             pub fn #write_method_ident(self, val: & #rust_field_type) -> Result<#next_type<'a, W>, W::Error> {
                 #write_invocation
@@ -590,11 +596,14 @@ fn emit_writer_field_state_transition_struct(
     let write_method_ident = format_ident!("write_{}", field_name);
     let after_field_type = quote!(#next_type<'a, W>);
 
+    let current_iter_count_initialization =
+        emit_writer_next_field_current_iter_count_initialization(next_state);
     let next_dimensions_fields =
         BaggageDimension::as_field_initializations_from_self(&next_state.baggage_dimensions);
     let after_field_constructor = quote! {
                 #next_type {
                     writer: done.writer,
+                    #current_iter_count_initialization
                     #( #next_dimensions_fields )*
                 }
     };
@@ -720,6 +729,8 @@ fn emit_writer_field_state_transition_array(
         Type::Array(at) => panic!("Multidimensional arrays are not supported yet."),
     };
 
+    let current_iter_count_initialization =
+        emit_writer_next_field_current_iter_count_initialization(next_state);
     let top_level_under_len_check =
         array_current_count_under_expected_check(field_name, 0, at, false)
             .expect("Arrays should have at least one dimension");
@@ -754,6 +765,7 @@ fn emit_writer_field_state_transition_array(
                 } else {
                     Ok(#next_type {
                         writer: self.writer,
+                        #current_iter_count_initialization
                         #( #next_dimensions_fields )*
                     })
                 }

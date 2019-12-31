@@ -101,3 +101,27 @@ fn struct_list_round_trip_happy_path() -> Result<(), TestError> {
     Ok(())
     // TODO - reading
 }
+#[test]
+fn multiple_list_round_trip_happy_path() -> Result<(), TestError> {
+    let mut buf = [0u8; 256];
+    {
+        let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
+        let pw = generated::single_dimension_list::Morse_segment_t::begin_write(&mut w)?;
+        let dots_to_write = [1, 10, 100, 1000, 10000];
+        let dashes_to_write = [2, 20, 200];
+        let mut pw: generated::single_dimension_list::morse_segment_t_Write_dots<_> = pw
+            .write_ndots(&(dots_to_write.len() as i32))?
+            .write_ndashes(&(dashes_to_write.len() as i32))?;
+        for (item_writer, dot) in (&mut pw).zip(&dots_to_write) {
+            item_writer.write(dot)?;
+        }
+        let mut pw: generated::single_dimension_list::morse_segment_t_Write_dashes<_> =
+            pw.done()?;
+        for (item_writer, dash) in (&mut pw).zip(&dashes_to_write) {
+            item_writer.write(dash)?;
+        }
+        let mut _pw: generated::single_dimension_list::morse_segment_t_Write_DONE<_> = pw.done()?;
+    }
+    Ok(())
+    // TODO - reading
+}

@@ -17,3 +17,11 @@ struct struct_list_t
     int32_t npoints;
     pair_t points[npoints];
 }
+
+struct morse_segment_t
+{
+    int32_t ndots;
+    int32_t ndashes;
+    int32_t dots[ndots];
+    int32_t dashes[ndashes];
+}
