@@ -12,6 +12,7 @@ impl<E> From<E> for DecodeFingerprintError<E> {
 
 #[derive(Debug)]
 pub enum DecodeValueError<E> {
+    ArrayLengthMismatch(&'static str),
     InvalidValue(&'static str),
     ReaderError(E),
 }

@@ -14,8 +14,8 @@ struct pair_t
 
 struct struct_list_t
 {
-    int32_t npoints;
-    pair_t points[npoints];
+    int32_t npairs;
+    pair_t pairs[npairs];
 }
 
 struct morse_segment_t
@@ -23,5 +23,5 @@ struct morse_segment_t
     int32_t ndots;
     int32_t ndashes;
     int32_t dots[ndots];
-    int32_t dashes[ndashes];
+    int8_t dashes[ndashes];
 }

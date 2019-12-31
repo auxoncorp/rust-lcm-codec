@@ -34,6 +34,8 @@ pub fn generate<'a, P1: AsRef<Path>, SF: IntoIterator<Item = P1>, P2: AsRef<Path
         assert_eq!(remaining, "", "Unparsed text at end of schema");
         all_schemas.push(ast);
     }
+    // TODO - either merge schema contents in the same package
+    // or error out when more than one file declares the same package
 
     let schemas_code = all_schemas.iter().map(|schema| {
         let env = fingerprint::Environment {
@@ -51,7 +53,6 @@ pub fn generate<'a, P1: AsRef<Path>, SF: IntoIterator<Item = P1>, P2: AsRef<Path
     write!(out_file, "{}", tokens).expect("Write out file");
     println!("{}", out_file_path.display());
     rustfmt(out_file_path);
-    // println!("{}", tokens);
 }
 
 fn rustfmt<P: AsRef<Path>>(path: P) {
@@ -357,11 +358,39 @@ fn emit_reader_state_decl(rs: &CodecState, env: &fingerprint::Environment) -> To
     } else {
         None
     };
+    let dimensions_fields = BaggageDimension::as_field_declarations(&rs.baggage_dimensions);
+    let (current_iter_count_field, array_item_reader_decl) = if let Some((
+        parser::Field {
+            ty: parser::Type::Array(at),
+            name,
+        },
+        _,
+    )) = &rs.field
+    {
+        let current_count_field_ident = array_current_count_field_ident(name.as_str(), 0, at)
+            .expect("Arrays must have at least one dimension");
+        let item_reader_struct_ident = format_ident!("{}_Item", struct_ident);
+        let array_item_reader_decl = quote! {
+            pub struct #item_reader_struct_ident<'a, R: rust_lcm_codec::StreamingReader> {
+                parent: &'a mut #struct_ident<'a, R>,
+            }
+        };
+        (
+            Some(quote!(#current_count_field_ident: usize, )),
+            Some(array_item_reader_decl),
+        )
+    } else {
+        (None, None)
+    };
     quote! {
         pub struct #struct_ident<'a, W: rust_lcm_codec::StreamingReader> {
             #allow_dead
             pub(super) reader: &'a mut W,
+            #current_iter_count_field
+            #( #dimensions_fields )*
         }
+
+        #array_item_reader_decl
     }
 }
 
@@ -444,7 +473,7 @@ fn emit_write_primitive_invocation(pt: &PrimitiveType, writer_path: WriterPath) 
     }
 }
 
-fn emit_writer_next_field_current_iter_count_initialization(
+fn emit_next_field_current_iter_count_initialization(
     next_state: &CodecState,
 ) -> Option<TokenStream> {
     if let Some((
@@ -488,7 +517,7 @@ fn emit_writer_field_state_transition_primitive(
                 .filter(|d| !field_serves_as_dimension || d.len_field_name.as_str() != field_name),
         );
         let current_iter_count_initialization =
-            emit_writer_next_field_current_iter_count_initialization(next_state);
+            emit_next_field_current_iter_count_initialization(next_state);
         quote! {
             pub fn #write_method_ident(self, val: & #rust_field_type) -> Result<#next_type<'a, W>, W::Error> {
                 #write_invocation
@@ -539,6 +568,7 @@ fn emit_write_struct_method(
             let ready = #struct_ns_prefix#field_struct_write_ready {
                 writer: #writer_path_tokens,
             };
+            #[allow(unused_variables)]
             let done = f(ready)?;
             #post_field_write
             Ok(#after_field_constructor)
@@ -557,7 +587,7 @@ fn emit_writer_field_state_transition_struct(
     let after_field_type = quote!(#next_type<'a, W>);
 
     let current_iter_count_initialization =
-        emit_writer_next_field_current_iter_count_initialization(next_state);
+        emit_next_field_current_iter_count_initialization(next_state);
     let next_dimensions_fields =
         BaggageDimension::as_field_initializations_from_self(&next_state.baggage_dimensions);
     let after_field_constructor = quote! {
@@ -653,7 +683,7 @@ fn emit_writer_field_state_transition_array(
     let pre_field_write = Some(quote! {
         if !(#item_writer_under_len_check) {
             Err(rust_lcm_codec::EncodeValueError::ArrayLengthMismatch(
-                "array length mismatch discovered when `done` called",
+                "array length mismatch discovered while iterating",
             ))?;
         }
     });
@@ -690,7 +720,7 @@ fn emit_writer_field_state_transition_array(
     };
 
     let current_iter_count_initialization =
-        emit_writer_next_field_current_iter_count_initialization(next_state);
+        emit_next_field_current_iter_count_initialization(next_state);
     let top_level_under_len_check =
         array_current_count_under_expected_check(field_name, 0, at, false)
             .expect("Arrays should have at least one dimension");
@@ -734,46 +764,89 @@ fn emit_writer_field_state_transition_array(
     }
 }
 
+impl parser::StructType {
+    fn namespace_prefix(&self) -> Option<TokenStream> {
+        if let Some(ns) = &self.namespace {
+            let namespace_ident = format_ident!("{}", ns);
+            Some(quote!(super::#namespace_ident::))
+        } else {
+            None
+        }
+    }
+}
+
 fn emit_reader_state_transition(
     rs: &CodecState,
-    rs_next: &CodecState,
+    next_state: &CodecState,
     env: &fingerprint::Environment,
 ) -> TokenStream {
     match rs.field {
-        Some((ref f, serves_as_dimension)) => {
+        Some((ref f, field_serves_as_dimension)) => {
             let start_type = rs.reader_ident();
-            let next_type = rs_next.reader_ident();
+            let next_type = next_state.reader_ident();
             let read_method_ident = format_ident!("read_{}", f.name);
             let read_method_ident_into = format_ident!("read_{}_into", f.name);
 
-            let read_methods = match &f.ty {
+            let next_dimensions_fields = BaggageDimension::as_field_initializations_from_self(
+                next_state.baggage_dimensions.iter().filter(|d| {
+                    !field_serves_as_dimension || d.len_field_name.as_str() != f.name.as_str()
+                }),
+            );
+            let current_iter_count_initialization =
+                emit_next_field_current_iter_count_initialization(next_state);
+            match &f.ty {
                 Type::Primitive(pt) => {
                     let rust_field_type = Some(format_ident!("{}", primitive_type_to_rust(&pt)));
+                    let dimensional_capture = if field_serves_as_dimension {
+                        let baggage_field_ident = format_ident!("baggage_{}", f.name);
+                        Some(quote!(#baggage_field_ident: v as usize,))
+                    } else {
+                        None
+                    };
                     let next_state = quote! {
                         #next_type {
                             reader: self.reader,
+                            #dimensional_capture
+                            #current_iter_count_initialization
+                            #( #next_dimensions_fields )*
                         }
                     };
-                    match pt {
+                    let read_methods = match pt {
                         PrimitiveType::String => quote! {
                             pub fn #read_method_ident(self) -> Result<(&'a #rust_field_type, #next_type<'a, R>), rust_lcm_codec::DecodeValueError<R::Error>> {
-                                let s = unsafe { core::mem::transmute(rust_lcm_codec::read_str_value(self.reader)?) };
-                                Ok((s, #next_state))
-                            }
-                        },
-                        _ => quote! {
-                            pub fn #read_method_ident(self) -> Result<(#rust_field_type, #next_type<'a, R>), rust_lcm_codec::DecodeValueError<R::Error>> {
-                                use rust_lcm_codec::SerializeValue;
-                                let v = SerializeValue::read_new_value(self.reader)?;
+                                let v = unsafe { core::mem::transmute(rust_lcm_codec::read_str_value(self.reader)?) };
                                 Ok((v, #next_state))
                             }
-
-                            pub fn #read_method_ident_into(self, val: &mut #rust_field_type) -> Result<#next_type<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>> {
-                                use rust_lcm_codec::SerializeValue;
-                                val.read_value(self.reader)?;
-                                Ok(#next_state)
-                            }
                         },
+                        _ => {
+                            let capture_binding = if dimensional_capture.is_some() {
+                                Some(quote!(let v = *val;))
+                            } else {
+                                None
+                            };
+                            quote! {
+                                pub fn #read_method_ident(self) -> Result<(#rust_field_type, #next_type<'a, R>), rust_lcm_codec::DecodeValueError<R::Error>> {
+                                    use rust_lcm_codec::SerializeValue;
+                                    let v = SerializeValue::read_new_value(self.reader)?;
+                                    Ok((v, #next_state))
+                                }
+
+                                pub fn #read_method_ident_into(self, val: &mut #rust_field_type) -> Result<#next_type<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>> {
+                                    use rust_lcm_codec::SerializeValue;
+                                    val.read_value(self.reader)?;
+                                    #capture_binding
+                                    Ok(#next_state)
+                                }
+                            }
+                        }
+                    };
+
+                    quote! {
+                        impl<'a, R: rust_lcm_codec::StreamingReader> #start_type<'a, R> {
+
+                            #[inline(always)]
+                            #read_methods
+                        }
                     }
                 }
                 Type::Struct(st) => {
@@ -781,37 +854,137 @@ fn emit_reader_state_transition(
                         CodecState::reader_struct_state_decl_ident(&st.name, &StateName::Ready);
                     let field_struct_read_done: Ident =
                         CodecState::reader_struct_state_decl_ident(&st.name, &StateName::Done);
-                    let struct_ns_prefix = if let Some(ns) = &st.namespace {
-                        let namespace_ident = format_ident!("{}", ns);
-                        Some(quote!(super::#namespace_ident::))
-                    } else {
-                        None
-                    };
+                    let struct_ns_prefix = st.namespace_prefix();
                     quote! {
-                        pub fn #read_method_ident<F>(self, f: F) -> Result<#next_type<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>>
-                            where F: FnOnce(#struct_ns_prefix#field_struct_read_ready<'a, R>) -> Result<#struct_ns_prefix#field_struct_read_done<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>>
-                        {
-                            let ready = #struct_ns_prefix#field_struct_read_ready {
-                                reader: self.reader,
-                            };
-                            let done = f(ready)?;
-                            Ok(#next_type {
-                                reader: done.reader,
-                            })
+                        impl<'a, R: rust_lcm_codec::StreamingReader> #start_type<'a, R> {
+
+                            #[inline(always)]
+                            pub fn #read_method_ident<F>(self, f: F) -> Result<#next_type<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>>
+                                where F: FnOnce(#struct_ns_prefix#field_struct_read_ready<'a, R>) -> Result<#struct_ns_prefix#field_struct_read_done<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>>
+                            {
+                                let ready = #struct_ns_prefix#field_struct_read_ready {
+                                    reader: self.reader,
+                                };
+                                let done = f(ready)?;
+                                Ok(#next_type {
+                                    reader: done.reader,
+                                    #current_iter_count_initialization
+                                    #( #next_dimensions_fields )*
+                                })
+                            }
                         }
                     }
                 }
-                Type::Array(_) => {
-                    // TODO !
-                    quote!(pub fn #read_method_ident(self) { unimplemented!() })
-                }
-            };
+                Type::Array(at) => {
+                    let read_method_ident = format_ident!("read");
+                    let current_iter_count_field_ident =
+                        array_current_count_field_ident(f.name.as_str(), 0, at)
+                            .expect("Arrays should have at least one dimension");
+                    let item_reader_under_len_check =
+                        array_current_count_under_expected_check(f.name.as_str(), 0, at, true)
+                            .expect("Arrays should have at least one dimension");
+                    let pre_field_read = quote! {
+                        if !(#item_reader_under_len_check) {
+                            Err(rust_lcm_codec::DecodeValueError::ArrayLengthMismatch(
+                                "array length mismatch discovered while iterating to read",
+                            ))?;
+                        }
+                    };
+                    let post_field_read = quote!(self.parent.#current_iter_count_field_ident += 1;);
+                    let read_item_method = match &*at.item_type {
+                        Type::Primitive(pt) => {
+                            let rust_field_type = format_ident!("{}", primitive_type_to_rust(pt));
+                            match pt {
+                                PrimitiveType::String => quote! {
+                                    pub fn #read_method_ident(self) -> Result<&'a #rust_field_type, rust_lcm_codec::DecodeValueError<R::Error>> {
+                                        #pre_field_read
+                                        let v = unsafe { core::mem::transmute(rust_lcm_codec::read_str_value(self.parent.reader)?) };
+                                        #post_field_read
+                                        Ok(v)
+                                    }
+                                },
+                                _ => quote! {
+                                    pub fn #read_method_ident(self) -> Result<#rust_field_type, rust_lcm_codec::DecodeValueError<R::Error>> {
+                                        #pre_field_read
+                                        use rust_lcm_codec::SerializeValue;
+                                        let v = SerializeValue::read_new_value(self.parent.reader)?;
+                                        #post_field_read
+                                        Ok(v)
+                                    }
+                                },
+                            }
+                        }
 
-            quote! {
-                impl<'a, R: rust_lcm_codec::StreamingReader> #start_type<'a, R> {
-
-                    #[inline(always)]
-                    #read_methods
+                        Type::Struct(st) => {
+                            let struct_ns_prefix = st.namespace_prefix();
+                            let field_struct_read_ready: Ident =
+                                CodecState::reader_struct_state_decl_ident(
+                                    &st.name,
+                                    &StateName::Ready,
+                                );
+                            let field_struct_read_done: Ident =
+                                CodecState::reader_struct_state_decl_ident(
+                                    &st.name,
+                                    &StateName::Done,
+                                );
+                            quote! {
+                                #[inline(always)]
+                                pub fn #read_method_ident<F>(self, f: F) -> Result<(), rust_lcm_codec::DecodeValueError<R::Error>>
+                                    where F: FnOnce(#struct_ns_prefix#field_struct_read_ready<'a, R>) -> Result<#struct_ns_prefix#field_struct_read_done<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>>
+                                {
+                                    #pre_field_read
+                                    let ready = #struct_ns_prefix#field_struct_read_ready {
+                                        reader: self.parent.reader,
+                                    };
+                                    let _done = f(ready)?;
+                                    #post_field_read
+                                    Ok(())
+                                }
+                            }
+                        }
+                        Type::Array(at) => panic!("Multidimensional arrays are not supported yet."),
+                    };
+                    let item_reader_struct_ident = format_ident!("{}_Item", start_type);
+                    let read_item_method_ident = format_ident!("read");
+                    let top_level_under_len_check =
+                        array_current_count_under_expected_check(f.name.as_str(), 0, at, false)
+                            .expect("Arrays should have at least one dimension");
+                    quote! {
+                        impl<'a, R: rust_lcm_codec::StreamingReader> Iterator for #start_type<'a, R> {
+                            type Item = #item_reader_struct_ident<'a, R>;
+                            fn next(&mut self) -> Option<Self::Item> {
+                                if #top_level_under_len_check {
+                                    unsafe {
+                                        Some(#item_reader_struct_ident {
+                                            parent: core::mem::transmute(self),
+                                        })
+                                    }
+                                } else {
+                                    None
+                                }
+                            }
+                        }
+                        impl<'a, R: rust_lcm_codec::StreamingReader> #item_reader_struct_ident<'a, R> {
+                            #[inline(always)]
+                            #read_item_method
+                        }
+                        impl<'a, R: rust_lcm_codec::StreamingReader> #start_type<'a, R> {
+                            #[inline(always)]
+                            pub fn done(self) -> Result<#next_type<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>> {
+                                if #top_level_under_len_check {
+                                    Err(rust_lcm_codec::DecodeValueError::ArrayLengthMismatch(
+                                        "array length mismatch discovered when read `done` called",
+                                    ))
+                                } else {
+                                    Ok(#next_type {
+                                        reader: self.reader,
+                                        #current_iter_count_initialization
+                                        #( #next_dimensions_fields )*
+                                    })
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
