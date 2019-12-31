@@ -101,7 +101,7 @@ impl StateName {
 }
 
 #[derive(Debug)]
-struct WriterState {
+struct CodecState {
     state_name: StateName,
     /// The name of the LCM struct this state is for
     struct_name: String,
@@ -113,6 +113,21 @@ struct WriterState {
     /// future states for the purposes of correctly sizing arrays,
     /// identified by the name of the field they serve
     baggage_dimensions: Vec<BaggageDimension>,
+}
+
+impl CodecState {
+    fn writer_struct_state_decl_ident(struct_name: &str, state_name: &StateName) -> Ident {
+        format_ident!("{}_Write_{}", struct_name, state_name.name())
+    }
+    fn reader_struct_state_decl_ident(struct_name: &str, state_name: &StateName) -> Ident {
+        format_ident!("{}_Read_{}", struct_name, state_name.name())
+    }
+    fn writer_ident(&self) -> Ident {
+        CodecState::writer_struct_state_decl_ident(&self.struct_name, &self.state_name)
+    }
+    fn reader_ident(&self) -> Ident {
+        CodecState::reader_struct_state_decl_ident(&self.struct_name, &self.state_name)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -145,78 +160,45 @@ impl BaggageDimension {
     }
 }
 
-impl WriterState {
-    fn struct_state_decl_ident(struct_name: &str, state_name: &StateName) -> Ident {
-        format_ident!("{}_Write_{}", struct_name, state_name.name())
-    }
-    fn ident(&self) -> Ident {
-        WriterState::struct_state_decl_ident(&self.struct_name, &self.state_name)
-    }
-}
-
-// TODO - see if we can / ought to collapse WriterState and ReaderState
-struct ReaderState {
-    state_name: StateName,
-    /// The name of the LCM struct this state is for
-    struct_name: String,
-    /// field that's read when transitioning out of this state
-    field: Option<parser::Field>,
-}
-
-impl ReaderState {
-    fn struct_state_decl_ident(struct_name: &str, state_name: &StateName) -> Ident {
-        format_ident!("{}_Read_{}", struct_name, state_name.name())
-    }
-    fn ident(&self) -> Ident {
-        ReaderState::struct_state_decl_ident(&self.struct_name, &self.state_name)
-    }
-}
-
 fn emit_struct(s: &parser::Struct, env: &fingerprint::Environment) -> TokenStream {
     let schema_hash_ident = format_ident!("{}_SCHEMA_HASH", s.name.to_uppercase());
     let schema_hash = fingerprint::struct_hash(&s, &env);
-    let (writer_states, reader_states) = gather_states(s);
+    let codec_states = gather_states(s);
     eprintln!("----- {} ---- ", s.name);
-    eprintln!("Writer states look like: {:#?}", writer_states);
+    eprintln!("Codec states look like: {:#?}", codec_states);
 
-    let writer_states_decl_code = writer_states
+    let writer_states_decl_code = codec_states
         .iter()
         .map(|ws| emit_writer_state_decl(&ws, &env));
 
-    let reader_states_decl_code = reader_states
+    let reader_states_decl_code = codec_states
         .iter()
         .map(|rs| emit_reader_state_decl(&rs, &env));
 
     let mut writer_states_transition_code = vec![];
-    for window in writer_states.windows(2) {
+    let mut reader_states_transition_code = vec![];
+    for window in codec_states.windows(2) {
         if let [start_state, end_state] = window {
             writer_states_transition_code.push(emit_writer_state_transition(
                 &start_state,
                 &end_state,
                 &env,
             ));
-        } else {
-            panic!("Unexpected window size in writer state transitions")
-        }
-    }
-    let mut reader_states_transition_code = vec![];
-    for window in reader_states.windows(2) {
-        if let [start_state, end_state] = window {
             reader_states_transition_code.push(emit_reader_state_transition(
                 &start_state,
                 &end_state,
                 &env,
             ));
         } else {
-            panic!("Unexpected window size in reader state transitions")
+            panic!("Unexpected window size in state transitions")
         }
     }
 
     let mut main_struct_name = s.name.clone();
     main_struct_name[0..1].make_ascii_uppercase();
     let main_struct = format_ident!("{}", main_struct_name);
-    let write_ready_type = writer_states[0].ident();
-    let read_ready_type = reader_states[0].ident();
+    let write_ready_type = codec_states[0].writer_ident();
+    let read_ready_type = codec_states[0].reader_ident();
 
     quote! {
         pub const #schema_hash_ident : u64 = #schema_hash;
@@ -258,26 +240,16 @@ fn emit_struct(s: &parser::Struct, env: &fingerprint::Environment) -> TokenStrea
     }
 }
 
-fn gather_states(s: &parser::Struct) -> (Vec<WriterState>, Vec<ReaderState>) {
-    let mut writer_states = Vec::new();
-    let mut reader_states = Vec::new();
+fn gather_states(s: &parser::Struct) -> Vec<CodecState> {
+    let mut codec_states = Vec::new();
 
-    writer_states.insert(
+    codec_states.insert(
         0,
-        WriterState {
+        CodecState {
             state_name: StateName::Done,
             struct_name: s.name.clone(),
             field: None,
             baggage_dimensions: Vec::with_capacity(0),
-        },
-    );
-
-    reader_states.insert(
-        0,
-        ReaderState {
-            state_name: StateName::Done,
-            struct_name: s.name.clone(),
-            field: None,
         },
     );
 
@@ -317,9 +289,9 @@ fn gather_states(s: &parser::Struct) -> (Vec<WriterState>, Vec<ReaderState>) {
                     f.name.as_str()
                 );
             }
-            writer_states.insert(
+            codec_states.insert(
                 0,
-                WriterState {
+                CodecState {
                     state_name: if i == 0 {
                         StateName::Ready
                     } else {
@@ -330,25 +302,13 @@ fn gather_states(s: &parser::Struct) -> (Vec<WriterState>, Vec<ReaderState>) {
                     baggage_dimensions: baggage_dimensions.clone(),
                 },
             );
-            reader_states.insert(
-                0,
-                ReaderState {
-                    state_name: if i == 0 {
-                        StateName::Ready
-                    } else {
-                        StateName::HandlingField(f.name.to_owned())
-                    },
-                    struct_name: s.name.clone(),
-                    field: Some(f.clone()),
-                },
-            );
         }
     }
-    (writer_states, reader_states)
+    codec_states
 }
 
-fn emit_writer_state_decl(ws: &WriterState, env: &fingerprint::Environment) -> TokenStream {
-    let struct_ident = ws.ident();
+fn emit_writer_state_decl(ws: &CodecState, env: &fingerprint::Environment) -> TokenStream {
+    let struct_ident = ws.writer_ident();
     let allow_dead = if ws.state_name == StateName::Done {
         Some(quote!(#[allow(dead_code)]))
     } else {
@@ -390,8 +350,8 @@ fn emit_writer_state_decl(ws: &WriterState, env: &fingerprint::Environment) -> T
     }
 }
 
-fn emit_reader_state_decl(rs: &ReaderState, env: &fingerprint::Environment) -> TokenStream {
-    let struct_ident = rs.ident();
+fn emit_reader_state_decl(rs: &CodecState, env: &fingerprint::Environment) -> TokenStream {
+    let struct_ident = rs.reader_ident();
     let allow_dead = if rs.state_name == StateName::Done {
         Some(quote!(#[allow(dead_code)]))
     } else {
@@ -420,14 +380,14 @@ fn primitive_type_to_rust(pt: &parser::PrimitiveType) -> &str {
 }
 
 fn emit_writer_state_transition(
-    ws: &WriterState,
-    ws_next: &WriterState,
+    ws: &CodecState,
+    ws_next: &CodecState,
     env: &fingerprint::Environment,
 ) -> TokenStream {
     match ws.field {
         Some((ref f, serves_as_dimension)) => {
-            let start_type = ws.ident();
-            let next_type = ws_next.ident();
+            let start_type = ws.writer_ident();
+            let next_type = ws_next.writer_ident();
             let write_method_ident = format_ident!("write_{}", f.name);
             match &f.ty {
                 parser::Type::Primitive(pt) => emit_writer_field_state_transition_primitive(
@@ -485,7 +445,7 @@ fn emit_write_primitive_invocation(pt: &PrimitiveType, writer_path: WriterPath) 
 }
 
 fn emit_writer_next_field_current_iter_count_initialization(
-    next_state: &WriterState,
+    next_state: &CodecState,
 ) -> Option<TokenStream> {
     if let Some((
         parser::Field {
@@ -505,7 +465,7 @@ fn emit_writer_next_field_current_iter_count_initialization(
 
 fn emit_writer_field_state_transition_primitive(
     start_type: Ident,
-    next_state: &WriterState,
+    next_state: &CodecState,
     field_name: &str,
     pt: &PrimitiveType,
     field_serves_as_dimension: bool,
@@ -520,7 +480,7 @@ fn emit_writer_field_state_transition_primitive(
         } else {
             None
         };
-        let next_type = next_state.ident();
+        let next_type = next_state.writer_ident();
         let next_dimensions_fields = BaggageDimension::as_field_initializations_from_self(
             next_state
                 .baggage_dimensions
@@ -560,9 +520,9 @@ fn emit_write_struct_method(
     writer_path: WriterPath,
 ) -> TokenStream {
     let field_struct_write_ready: Ident =
-        WriterState::struct_state_decl_ident(&st.name, &StateName::Ready);
+        CodecState::writer_struct_state_decl_ident(&st.name, &StateName::Ready);
     let field_struct_write_done: Ident =
-        WriterState::struct_state_decl_ident(&st.name, &StateName::Done);
+        CodecState::writer_struct_state_decl_ident(&st.name, &StateName::Done);
     let struct_ns_prefix = if let Some(ns) = &st.namespace {
         let namespace_ident = format_ident!("{}", ns);
         Some(quote!(super::#namespace_ident::))
@@ -588,11 +548,11 @@ fn emit_write_struct_method(
 
 fn emit_writer_field_state_transition_struct(
     start_type: Ident,
-    next_state: &WriterState,
+    next_state: &CodecState,
     field_name: &str,
     st: &StructType,
 ) -> TokenStream {
-    let next_type = next_state.ident();
+    let next_type = next_state.writer_ident();
     let write_method_ident = format_ident!("write_{}", field_name);
     let after_field_type = quote!(#next_type<'a, W>);
 
@@ -675,13 +635,13 @@ fn array_current_count_under_expected_check(
 /// call `done` on this state instance to consume it and move on.
 fn emit_writer_field_state_transition_array(
     start_type: Ident,
-    next_state: &WriterState,
+    next_state: &CodecState,
     field_name: &str,
     at: &ArrayType,
 ) -> TokenStream {
     let current_count_ident = array_current_count_field_ident(field_name, 0, at)
         .expect("Arrays should have at least one dimension");
-    let next_type = next_state.ident();
+    let next_type = next_state.writer_ident();
     let next_dimensions_fields =
         BaggageDimension::as_field_initializations_from_self(&next_state.baggage_dimensions);
     let item_writer_struct_ident = format_ident!("{}_Item", start_type);
@@ -775,14 +735,14 @@ fn emit_writer_field_state_transition_array(
 }
 
 fn emit_reader_state_transition(
-    rs: &ReaderState,
-    rs_next: &ReaderState,
+    rs: &CodecState,
+    rs_next: &CodecState,
     env: &fingerprint::Environment,
 ) -> TokenStream {
     match rs.field {
-        Some(ref f) => {
-            let start_type = rs.ident();
-            let next_type = rs_next.ident();
+        Some((ref f, serves_as_dimension)) => {
+            let start_type = rs.reader_ident();
+            let next_type = rs_next.reader_ident();
             let read_method_ident = format_ident!("read_{}", f.name);
             let read_method_ident_into = format_ident!("read_{}_into", f.name);
 
@@ -818,9 +778,9 @@ fn emit_reader_state_transition(
                 }
                 Type::Struct(st) => {
                     let field_struct_read_ready: Ident =
-                        ReaderState::struct_state_decl_ident(&st.name, &StateName::Ready);
+                        CodecState::reader_struct_state_decl_ident(&st.name, &StateName::Ready);
                     let field_struct_read_done: Ident =
-                        ReaderState::struct_state_decl_ident(&st.name, &StateName::Done);
+                        CodecState::reader_struct_state_decl_ident(&st.name, &StateName::Done);
                     let struct_ns_prefix = if let Some(ns) = &st.namespace {
                         let namespace_ident = format_ident!("{}", ns);
                         Some(quote!(super::#namespace_ident::))
