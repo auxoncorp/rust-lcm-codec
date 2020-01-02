@@ -1,3 +1,4 @@
+#![no_std]
 #[derive(Debug)]
 pub enum DecodeFingerprintError<E> {
     InvalidFingerprint(u64),
