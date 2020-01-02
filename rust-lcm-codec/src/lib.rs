@@ -110,6 +110,10 @@ impl<'a> BufferWriter<'a> {
     pub fn new(buffer: &'a mut [u8]) -> BufferWriter<'a> {
         BufferWriter { buffer, cursor: 0 }
     }
+
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
 }
 
 impl<'a> StreamingWriter for BufferWriter<'a> {
