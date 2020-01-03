@@ -24,7 +24,7 @@ impl<E> From<E> for DecodeValueError<E> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum EncodeValueError<E> {
     ArrayLengthMismatch(&'static str),
     InvalidValue(&'static str),
@@ -103,11 +103,10 @@ pub trait StreamingWriter {
     fn flush() -> Result<(), Self::Error>;
 }
 
-// Writer backend for a byte slice
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub struct BufferWriterError;
 
-#[derive(Debug)]
-pub enum BufferWriterError {}
-
+/// Writer backend for a byte slice
 pub struct BufferWriter<'a> {
     buffer: &'a mut [u8],
     cursor: usize,
@@ -129,9 +128,14 @@ impl<'a> StreamingWriter for BufferWriter<'a> {
     #[inline(always)]
     fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
         let len = bytes.len();
-        self.buffer[self.cursor..self.cursor + len].copy_from_slice(bytes);
-        self.cursor += len;
-        Ok(())
+        let end = self.cursor + len;
+        if end <= self.buffer.len() {
+            self.buffer[self.cursor..end].copy_from_slice(bytes);
+            self.cursor += len;
+            Ok(())
+        } else {
+            Err(BufferWriterError)
+        }
     }
 
     #[inline(always)]

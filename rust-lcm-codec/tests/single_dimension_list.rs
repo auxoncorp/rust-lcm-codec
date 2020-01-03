@@ -51,7 +51,6 @@ fn primitive_list_round_trip_happy_path() -> Result<(), TestError> {
         for (item_writer, val) in (&mut pw).zip(&item_values_to_write) {
             item_writer.write(*val)?;
         }
-        //let pw: generated::single_dimension_list::point_list_t_Write_points<_> = pw;
         let _write_done: generated::single_dimension_list::point_list_t_write_done<_> =
             pw.done()?;
     }

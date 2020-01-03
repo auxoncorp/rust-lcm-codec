@@ -31,6 +31,30 @@ impl From<rust_lcm_codec::DecodeValueError<rust_lcm_codec::BufferReaderError>> f
 }
 
 #[test]
+fn not_big_enough_buffer_for_fingerprint() {
+    let mut buf = [0u8; 7];
+    let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
+    if let Err(e) = generated::primitives::begin_primitives_t_write(&mut w) {
+        assert_eq!(BufferWriterError, e);
+    } else {
+        panic!("Expected an error, dagnabit");
+    }
+}
+
+#[test]
+fn not_big_enough_buffer_for_field() {
+    let mut buf = [0u8; 8];
+    let mut buffer_writer = rust_lcm_codec::BufferWriter::new(&mut buf);
+    let w = generated::primitives::begin_primitives_t_write(&mut buffer_writer)
+        .expect("Enough space for fingerprint");
+    if let Err(e) = w.write_int8_field(1) {
+        assert_eq!(BufferWriterError, e);
+    } else {
+        panic!("Expected an error");
+    }
+}
+
+#[test]
 fn prim_test_read_direct() -> Result<(), TestError> {
     let mut buf = [0u8; 256];
     {
