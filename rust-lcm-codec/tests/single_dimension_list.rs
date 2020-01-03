@@ -43,20 +43,19 @@ fn primitive_list_round_trip_happy_path() -> Result<(), TestError> {
     let item_values_to_write = [0.0f64, 0.1, 0.2, 0.3, 0.4];
     {
         let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
-        let pw = generated::single_dimension_list::Point_list_t::begin_write(&mut w)?;
-        let mut pw: generated::single_dimension_list::point_list_t_Write_points<_> =
-            pw.write_npoints(&5)?;
+        let pw = generated::single_dimension_list::begin_point_list_t_write(&mut w)?;
+        let mut pw: generated::single_dimension_list::point_list_t_write_points<_> =
+            pw.write_npoints(5)?;
         // Use the point-list writer at the array-writing state as an iterator
         // that generates single-value-writing delegates
         for (item_writer, val) in (&mut pw).zip(&item_values_to_write) {
-            item_writer.write(val)?;
+            item_writer.write(*val)?;
         }
-        //let pw: generated::single_dimension_list::point_list_t_Write_points<_> = pw;
-        let _write_done: generated::single_dimension_list::point_list_t_Write_DONE<_> =
+        let _write_done: generated::single_dimension_list::point_list_t_write_done<_> =
             pw.done()?;
     }
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
-    let pr = generated::single_dimension_list::Point_list_t::begin_read(&mut r)?;
+    let pr = generated::single_dimension_list::begin_point_list_t_read(&mut r)?;
     let (found_npoints, mut pr) = pr.read_npoints()?;
     let mut point_storage = [0.0f64; 5];
     for (item_reader, point_destination) in (&mut pr).zip(point_storage.iter_mut()) {
@@ -64,7 +63,7 @@ fn primitive_list_round_trip_happy_path() -> Result<(), TestError> {
     }
     assert_eq!(5, found_npoints);
     assert_eq!(&point_storage, &item_values_to_write);
-    let _read_done: generated::single_dimension_list::point_list_t_Read_DONE<_> = pr.done()?;
+    let _read_done: generated::single_dimension_list::point_list_t_read_done<_> = pr.done()?;
     Ok(())
 }
 #[test]
@@ -73,23 +72,23 @@ fn struct_list_round_trip_happy_path() -> Result<(), TestError> {
     let item_values_to_write = [(0, 0), (1, 2), (2, 4), (3, 6), (4, 8)];
     {
         let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
-        let pw = generated::single_dimension_list::Struct_list_t::begin_write(&mut w)?;
-        let mut pw: generated::single_dimension_list::struct_list_t_Write_pairs<_> =
-            pw.write_npairs(&5)?;
+        let pw = generated::single_dimension_list::begin_struct_list_t_write(&mut w)?;
+        let mut pw: generated::single_dimension_list::struct_list_t_write_pairs<_> =
+            pw.write_npairs(5)?;
         // Use the pair-list writer at the array-writing state as an iterator
         // that generates single-value-writing delegates
         for (item_writer, val) in (&mut pw).zip(&item_values_to_write) {
             item_writer.write(|struct_field_writer| {
-                let struct_field_writer = struct_field_writer.write_left(&val.0)?;
-                let struct_field_writer = struct_field_writer.write_right(&val.1)?;
+                let struct_field_writer = struct_field_writer.write_left(val.0)?;
+                let struct_field_writer = struct_field_writer.write_right(val.1)?;
                 Ok(struct_field_writer)
             })?;
         }
-        let _write_done: generated::single_dimension_list::struct_list_t_Write_DONE<_> =
+        let _write_done: generated::single_dimension_list::struct_list_t_write_done<_> =
             pw.done()?;
     }
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
-    let pr = generated::single_dimension_list::Struct_list_t::begin_read(&mut r)?;
+    let pr = generated::single_dimension_list::begin_struct_list_t_read(&mut r)?;
     let (found_npairs, mut pr) = pr.read_npairs()?;
     assert_eq!(5, found_npairs);
     let mut read_pairs = vec![];
@@ -106,7 +105,7 @@ fn struct_list_round_trip_happy_path() -> Result<(), TestError> {
         read_pairs.push((found_left, found_right));
     }
     assert_eq!(&read_pairs, &item_values_to_write);
-    let _read_done: generated::single_dimension_list::struct_list_t_Read_DONE<_> = pr.done()?;
+    let _read_done: generated::single_dimension_list::struct_list_t_read_done<_> = pr.done()?;
     Ok(())
 }
 #[test]
@@ -116,22 +115,22 @@ fn multiple_list_round_trip_happy_path() -> Result<(), TestError> {
     let dashes_to_write = [2i8, 20, 120];
     {
         let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
-        let pw = generated::single_dimension_list::Morse_segment_t::begin_write(&mut w)?;
-        let mut pw: generated::single_dimension_list::morse_segment_t_Write_dots<_> = pw
-            .write_ndots(&(dots_to_write.len() as i32))?
-            .write_ndashes(&(dashes_to_write.len() as i32))?;
+        let pw = generated::single_dimension_list::begin_morse_segment_t_write(&mut w)?;
+        let mut pw: generated::single_dimension_list::morse_segment_t_write_dots<_> = pw
+            .write_ndots(dots_to_write.len() as i32)?
+            .write_ndashes(dashes_to_write.len() as i32)?;
         for (item_writer, dot) in (&mut pw).zip(&dots_to_write) {
-            item_writer.write(dot)?;
+            item_writer.write(*dot)?;
         }
-        let mut pw: generated::single_dimension_list::morse_segment_t_Write_dashes<_> =
+        let mut pw: generated::single_dimension_list::morse_segment_t_write_dashes<_> =
             pw.done()?;
         for (item_writer, dash) in (&mut pw).zip(&dashes_to_write) {
-            item_writer.write(dash)?;
+            item_writer.write(*dash)?;
         }
-        let _pw: generated::single_dimension_list::morse_segment_t_Write_DONE<_> = pw.done()?;
+        let _pw: generated::single_dimension_list::morse_segment_t_write_done<_> = pw.done()?;
     }
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
-    let pr = generated::single_dimension_list::Morse_segment_t::begin_read(&mut r)?;
+    let pr = generated::single_dimension_list::begin_morse_segment_t_read(&mut r)?;
     let (found_ndots, pr) = pr.read_ndots()?;
     assert_eq!(found_ndots as usize, dots_to_write.len());
     let (found_ndashes, mut pr) = pr.read_ndashes()?;
@@ -147,6 +146,6 @@ fn multiple_list_round_trip_happy_path() -> Result<(), TestError> {
         found_dashes.push(item_reader.read()?);
     }
     assert_eq!(&found_dashes, &dashes_to_write);
-    let _pr: generated::single_dimension_list::morse_segment_t_Read_DONE<_> = pr.done()?;
+    let _pr: generated::single_dimension_list::morse_segment_t_read_done<_> = pr.done()?;
     Ok(())
 }

@@ -31,54 +31,27 @@ impl From<rust_lcm_codec::DecodeValueError<rust_lcm_codec::BufferReaderError>> f
 }
 
 #[test]
-fn prim_test_read_to_field() -> Result<(), TestError> {
-    let mut buf = [0u8; 256];
-    {
-        let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
-        let pw = generated::primitives::Primitives_t::begin_write(&mut w)?;
-        let _done: generated::primitives::primitives_t_Write_DONE<_> = pw
-            .write_int8_field(&1)?
-            .write_int16_field(&2)?
-            .write_int32_field(&3)?
-            .write_int64_field(&4)?
-            .write_float_field(&5.0)?
-            .write_double_field(&6.0)?
-            .write_string_field("seven")?
-            .write_bool_field(&true)?
-            .write_byte_field(&8)?;
+fn not_big_enough_buffer_for_fingerprint() {
+    let mut buf = [0u8; 7];
+    let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
+    if let Err(e) = generated::primitives::begin_primitives_t_write(&mut w) {
+        assert_eq!(BufferWriterError, e);
+    } else {
+        panic!("Expected an error, dagnabit");
     }
-    let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
-    let pr = generated::primitives::Primitives_t::begin_read(&mut r)?;
-    let mut int8_field = i8::default();
-    let mut int16_field = i16::default();
-    let mut int32_field = i32::default();
-    let mut int64_field = i64::default();
-    let mut float_field = f32::default();
-    let mut double_field = f64::default();
-    let mut bool_field = bool::default();
-    let mut byte_field = u8::default();
-    let (string_field, bool_reader) = pr
-        .read_int8_field_into(&mut int8_field)?
-        .read_int16_field_into(&mut int16_field)?
-        .read_int32_field_into(&mut int32_field)?
-        .read_int64_field_into(&mut int64_field)?
-        .read_float_field_into(&mut float_field)?
-        .read_double_field_into(&mut double_field)?
-        .read_string_field()?;
-    assert_eq!(1, int8_field);
-    assert_eq!(2, int16_field);
-    assert_eq!(3, int32_field);
-    assert_eq!(4, int64_field);
-    assert_eq!(5.0, float_field);
-    assert_eq!(6.0, double_field);
-    assert_eq!("seven", string_field);
+}
 
-    bool_reader
-        .read_bool_field_into(&mut bool_field)?
-        .read_byte_field_into(&mut byte_field)?;
-    assert_eq!(true, bool_field);
-    assert_eq!(8, byte_field);
-    Ok(())
+#[test]
+fn not_big_enough_buffer_for_field() {
+    let mut buf = [0u8; 8];
+    let mut buffer_writer = rust_lcm_codec::BufferWriter::new(&mut buf);
+    let w = generated::primitives::begin_primitives_t_write(&mut buffer_writer)
+        .expect("Enough space for fingerprint");
+    if let Err(e) = w.write_int8_field(1) {
+        assert_eq!(BufferWriterError, e);
+    } else {
+        panic!("Expected an error");
+    }
 }
 
 #[test]
@@ -86,20 +59,20 @@ fn prim_test_read_direct() -> Result<(), TestError> {
     let mut buf = [0u8; 256];
     {
         let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
-        let pw = generated::primitives::Primitives_t::begin_write(&mut w)?;
-        let _write_done: generated::primitives::primitives_t_Write_DONE<_> = pw
-            .write_int8_field(&1)?
-            .write_int16_field(&2)?
-            .write_int32_field(&3)?
-            .write_int64_field(&4)?
-            .write_float_field(&5.0)?
-            .write_double_field(&6.0)?
+        let pw = generated::primitives::begin_primitives_t_write(&mut w)?;
+        let _write_done: generated::primitives::primitives_t_write_done<_> = pw
+            .write_int8_field(1)?
+            .write_int16_field(2)?
+            .write_int32_field(3)?
+            .write_int64_field(4)?
+            .write_float_field(5.0)?
+            .write_double_field(6.0)?
             .write_string_field("seven")?
-            .write_bool_field(&true)?
-            .write_byte_field(&8)?;
+            .write_bool_field(true)?
+            .write_byte_field(8)?;
     }
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
-    let pr = generated::primitives::Primitives_t::begin_read(&mut r)?;
+    let pr = generated::primitives::begin_primitives_t_read(&mut r)?;
     let (int8_field, pr) = pr.read_int8_field()?;
     let (int16_field, pr) = pr.read_int16_field()?;
     let (int32_field, pr) = pr.read_int32_field()?;
@@ -109,7 +82,7 @@ fn prim_test_read_direct() -> Result<(), TestError> {
     let (string_field, pr) = pr.read_string_field()?;
     let (bool_field, pr) = pr.read_bool_field()?;
     let (byte_field, pr) = pr.read_byte_field()?;
-    let _read_done: generated::primitives::primitives_t_Read_DONE<_> = pr;
+    let _read_done: generated::primitives::primitives_t_read_done<_> = pr;
     assert_eq!(1, int8_field);
     assert_eq!(2, int16_field);
     assert_eq!(3, int32_field);
