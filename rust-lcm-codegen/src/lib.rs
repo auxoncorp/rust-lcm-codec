@@ -801,8 +801,6 @@ fn emit_reader_state_transition(
             let start_type = rs.reader_ident();
             let next_type = next_state.reader_ident();
             let read_method_ident = format_ident!("read_{}", f.name);
-            let read_method_ident_into = format_ident!("read_{}_into", f.name);
-
             let next_dimensions_fields = BaggageDimension::as_field_initializations_from_self(
                 next_state.baggage_dimensions.iter().filter(|d| {
                     !field_serves_as_dimension || d.len_field_name.as_str() != f.name.as_str()
@@ -846,13 +844,6 @@ fn emit_reader_state_transition(
                                     use rust_lcm_codec::SerializeValue;
                                     let v = SerializeValue::read_new_value(self.reader)?;
                                     Ok((v, #next_state))
-                                }
-
-                                pub fn #read_method_ident_into(self, val: &mut #rust_field_type) -> Result<#next_type<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>> {
-                                    use rust_lcm_codec::SerializeValue;
-                                    val.read_value(self.reader)?;
-                                    #capture_binding
-                                    Ok(#next_state)
                                 }
                             }
                         }

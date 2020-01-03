@@ -142,10 +142,6 @@ impl<'a> StreamingWriter for BufferWriter<'a> {
 
 // Value serialization trait
 pub trait SerializeValue: Sized {
-    fn read_value<R: StreamingReader>(
-        &mut self,
-        reader: &mut R,
-    ) -> Result<(), DecodeValueError<R::Error>>;
     fn read_new_value<R: StreamingReader>(
         reader: &mut R,
     ) -> Result<Self, DecodeValueError<R::Error>>;
@@ -155,17 +151,6 @@ pub trait SerializeValue: Sized {
 macro_rules! primitive_serialize_impl {
     ($ty:ty) => {
         impl SerializeValue for $ty {
-            #[inline(always)]
-            fn read_value<R: StreamingReader>(
-                &mut self,
-                reader: &mut R,
-            ) -> Result<(), DecodeValueError<R::Error>> {
-                let mut bytes = self.to_ne_bytes();
-                reader.read_bytes(&mut bytes)?;
-                *self = Self::from_be_bytes(bytes);
-                Ok(())
-            }
-
             #[inline(always)]
             fn read_new_value<R: StreamingReader>(
                 reader: &mut R,
@@ -200,8 +185,7 @@ pub fn write_str_value<W: StreamingWriter>(string: &str, writer: &mut W) -> Resu
 pub fn read_str_value<R: StreamingReader>(
     reader: &mut R,
 ) -> Result<&str, DecodeValueError<<R as StreamingReader>::Error>> {
-    let mut len: i32 = 0;
-    len.read_value(reader)?;
+    let len: i32 = i32::read_new_value(reader)?;
     if len < 0 {
         return Err(DecodeValueError::InvalidValue("str length was less than 0"));
     }
@@ -216,20 +200,6 @@ pub fn read_str_value<R: StreamingReader>(
 }
 
 impl SerializeValue for bool {
-    fn read_value<R: StreamingReader>(
-        &mut self,
-        reader: &mut R,
-    ) -> Result<(), DecodeValueError<<R as StreamingReader>::Error>> {
-        let mut buffer = [0u8; 1];
-        reader.read_bytes(&mut buffer)?;
-        *self = match buffer[0] {
-            0 => false,
-            1 => true,
-            _ => return Err(DecodeValueError::InvalidValue("invalid bool value")),
-        };
-        Ok(())
-    }
-
     fn read_new_value<R: StreamingReader>(
         reader: &mut R,
     ) -> Result<Self, DecodeValueError<<R as StreamingReader>::Error>> {
