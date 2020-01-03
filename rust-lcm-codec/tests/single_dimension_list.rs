@@ -45,11 +45,11 @@ fn primitive_list_round_trip_happy_path() -> Result<(), TestError> {
         let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
         let pw = generated::single_dimension_list::Point_list_t::begin_write(&mut w)?;
         let mut pw: generated::single_dimension_list::point_list_t_Write_points<_> =
-            pw.write_npoints(&5)?;
+            pw.write_npoints(5)?;
         // Use the point-list writer at the array-writing state as an iterator
         // that generates single-value-writing delegates
         for (item_writer, val) in (&mut pw).zip(&item_values_to_write) {
-            item_writer.write(val)?;
+            item_writer.write(*val)?;
         }
         //let pw: generated::single_dimension_list::point_list_t_Write_points<_> = pw;
         let _write_done: generated::single_dimension_list::point_list_t_Write_DONE<_> =
@@ -75,13 +75,13 @@ fn struct_list_round_trip_happy_path() -> Result<(), TestError> {
         let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
         let pw = generated::single_dimension_list::Struct_list_t::begin_write(&mut w)?;
         let mut pw: generated::single_dimension_list::struct_list_t_Write_pairs<_> =
-            pw.write_npairs(&5)?;
+            pw.write_npairs(5)?;
         // Use the pair-list writer at the array-writing state as an iterator
         // that generates single-value-writing delegates
         for (item_writer, val) in (&mut pw).zip(&item_values_to_write) {
             item_writer.write(|struct_field_writer| {
-                let struct_field_writer = struct_field_writer.write_left(&val.0)?;
-                let struct_field_writer = struct_field_writer.write_right(&val.1)?;
+                let struct_field_writer = struct_field_writer.write_left(val.0)?;
+                let struct_field_writer = struct_field_writer.write_right(val.1)?;
                 Ok(struct_field_writer)
             })?;
         }
@@ -118,15 +118,15 @@ fn multiple_list_round_trip_happy_path() -> Result<(), TestError> {
         let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
         let pw = generated::single_dimension_list::Morse_segment_t::begin_write(&mut w)?;
         let mut pw: generated::single_dimension_list::morse_segment_t_Write_dots<_> = pw
-            .write_ndots(&(dots_to_write.len() as i32))?
-            .write_ndashes(&(dashes_to_write.len() as i32))?;
+            .write_ndots((dots_to_write.len() as i32))?
+            .write_ndashes((dashes_to_write.len() as i32))?;
         for (item_writer, dot) in (&mut pw).zip(&dots_to_write) {
-            item_writer.write(dot)?;
+            item_writer.write(*dot)?;
         }
         let mut pw: generated::single_dimension_list::morse_segment_t_Write_dashes<_> =
             pw.done()?;
         for (item_writer, dash) in (&mut pw).zip(&dashes_to_write) {
-            item_writer.write(dash)?;
+            item_writer.write(*dash)?;
         }
         let _pw: generated::single_dimension_list::morse_segment_t_Write_DONE<_> = pw.done()?;
     }

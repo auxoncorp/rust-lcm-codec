@@ -37,15 +37,15 @@ fn prim_test_read_to_field() -> Result<(), TestError> {
         let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
         let pw = generated::primitives::Primitives_t::begin_write(&mut w)?;
         let _done: generated::primitives::primitives_t_Write_DONE<_> = pw
-            .write_int8_field(&1)?
-            .write_int16_field(&2)?
-            .write_int32_field(&3)?
-            .write_int64_field(&4)?
-            .write_float_field(&5.0)?
-            .write_double_field(&6.0)?
+            .write_int8_field(1)?
+            .write_int16_field(2)?
+            .write_int32_field(3)?
+            .write_int64_field(4)?
+            .write_float_field(5.0)?
+            .write_double_field(6.0)?
             .write_string_field("seven")?
-            .write_bool_field(&true)?
-            .write_byte_field(&8)?;
+            .write_bool_field(true)?
+            .write_byte_field(8)?;
     }
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
     let pr = generated::primitives::Primitives_t::begin_read(&mut r)?;
@@ -88,15 +88,15 @@ fn prim_test_read_direct() -> Result<(), TestError> {
         let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
         let pw = generated::primitives::Primitives_t::begin_write(&mut w)?;
         let _write_done: generated::primitives::primitives_t_Write_DONE<_> = pw
-            .write_int8_field(&1)?
-            .write_int16_field(&2)?
-            .write_int32_field(&3)?
-            .write_int64_field(&4)?
-            .write_float_field(&5.0)?
-            .write_double_field(&6.0)?
+            .write_int8_field(1)?
+            .write_int16_field(2)?
+            .write_int32_field(3)?
+            .write_int64_field(4)?
+            .write_float_field(5.0)?
+            .write_double_field(6.0)?
             .write_string_field("seven")?
-            .write_bool_field(&true)?
-            .write_byte_field(&8)?;
+            .write_bool_field(true)?
+            .write_byte_field(8)?;
     }
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
     let pr = generated::primitives::Primitives_t::begin_read(&mut r)?;

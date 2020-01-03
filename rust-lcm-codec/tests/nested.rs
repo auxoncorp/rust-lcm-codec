@@ -44,11 +44,11 @@ fn nested_round_trip_happy_path() -> Result<(), TestError> {
         let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
         let pw = generated::nested::Local_nested_t::begin_write(&mut w)?;
         let _write_done: generated::nested::local_nested_t_Write_DONE<_> = pw
-            .write_j(&1)?
+            .write_j(1)?
             .write_k(|local_primitive_write_ready| {
-                Ok(local_primitive_write_ready.write_m(&2)?.write_n(&3)?)
+                Ok(local_primitive_write_ready.write_m(2)?.write_n(3)?)
             })?
-            .write_p(&4)?;
+            .write_p(4)?;
     }
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
     let pr = generated::nested::Local_nested_t::begin_read(&mut r)?;
@@ -78,13 +78,13 @@ fn nested_remote_package_field_round_trip_happy_path() -> Result<(), TestError> 
         let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
         let pw = generated::nested::Remote_nested_t::begin_write(&mut w)?;
         let _write_done: generated::nested::remote_nested_t_Write_DONE<_> = pw
-            .write_j(&1)?
+            .write_j(1)?
             .write_k(|local_primitive_write_ready| {
                 Ok(local_primitive_write_ready
-                    .write_utime(&2)?
-                    .write_degCelsius(&3.0)?)
+                    .write_utime(2)?
+                    .write_degCelsius(3.0)?)
             })?
-            .write_p(&4)?;
+            .write_p(4)?;
     }
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
     let pr = generated::nested::Remote_nested_t::begin_read(&mut r)?;

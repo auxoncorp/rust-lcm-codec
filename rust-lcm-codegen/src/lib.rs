@@ -467,8 +467,7 @@ fn emit_write_primitive_invocation(pt: &PrimitiveType, writer_path: WriterPath) 
             rust_lcm_codec::write_str_value(val, #path)?;
         },
         _ => quote! {
-            use rust_lcm_codec::SerializeValue;
-            val.write_value(#path)?;
+            rust_lcm_codec::SerializeValue::write_value(val, #path)?;
         },
     }
 }
@@ -501,11 +500,16 @@ fn emit_writer_field_state_transition_primitive(
 ) -> TokenStream {
     let write_method_ident = format_ident!("write_{}", field_name);
     let write_method = {
+        let maybe_ref = if *pt == PrimitiveType::String {
+            Some(quote!(&))
+        } else {
+            None
+        };
         let rust_field_type = format_ident!("{}", primitive_type_to_rust(&pt));
         let write_invocation = emit_write_primitive_invocation(pt, WriterPath::ViaSelf);
         let dimensional_capture = if field_serves_as_dimension {
             let baggage_field_ident = format_ident!("baggage_{}", field_name);
-            Some(quote!(#baggage_field_ident: (*val) as usize,))
+            Some(quote!(#baggage_field_ident: val as usize,))
         } else {
             None
         };
@@ -519,7 +523,7 @@ fn emit_writer_field_state_transition_primitive(
         let current_iter_count_initialization =
             emit_next_field_current_iter_count_initialization(next_state);
         quote! {
-            pub fn #write_method_ident(self, val: & #rust_field_type) -> Result<#next_type<'a, W>, W::Error> {
+            pub fn #write_method_ident(self, val: #maybe_ref #rust_field_type) -> Result<#next_type<'a, W>, W::Error> {
                 #write_invocation
                 Ok(#next_type {
                     writer: self.writer,
@@ -692,10 +696,15 @@ fn emit_writer_field_state_transition_array(
     });
     let write_item_method = match &*at.item_type {
         Type::Primitive(pt) => {
+            let maybe_ref = if *pt == PrimitiveType::String {
+                Some(quote!(&))
+            } else {
+                None
+            };
             let rust_field_type = Some(format_ident!("{}", primitive_type_to_rust(&pt)));
             let write_invocation = emit_write_primitive_invocation(pt, WriterPath::ViaSelfParent);
             quote! {
-                pub fn #write_item_method_ident(self, val: & #rust_field_type) -> Result<(), rust_lcm_codec::EncodeValueError<W::Error>> {
+                pub fn #write_item_method_ident(self, val: #maybe_ref #rust_field_type) -> Result<(), rust_lcm_codec::EncodeValueError<W::Error>> {
                     #pre_field_write
                     #write_invocation
                     #post_field_write

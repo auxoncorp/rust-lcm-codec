@@ -149,7 +149,7 @@ pub trait SerializeValue: Sized {
     fn read_new_value<R: StreamingReader>(
         reader: &mut R,
     ) -> Result<Self, DecodeValueError<R::Error>>;
-    fn write_value<W: StreamingWriter>(&self, writer: &mut W) -> Result<(), W::Error>;
+    fn write_value<W: StreamingWriter>(val: Self, writer: &mut W) -> Result<(), W::Error>;
 }
 
 macro_rules! primitive_serialize_impl {
@@ -176,8 +176,8 @@ macro_rules! primitive_serialize_impl {
             }
 
             #[inline(always)]
-            fn write_value<W: StreamingWriter>(&self, writer: &mut W) -> Result<(), W::Error> {
-                writer.write_bytes(&self.to_be_bytes())
+            fn write_value<W: StreamingWriter>(val: Self, writer: &mut W) -> Result<(), W::Error> {
+                writer.write_bytes(&val.to_be_bytes())
             }
         }
     };
@@ -242,7 +242,7 @@ impl SerializeValue for bool {
         }
     }
 
-    fn write_value<W: StreamingWriter>(&self, writer: &mut W) -> Result<(), W::Error> {
-        (if *self { 1i8 } else { 0i8 }).write_value(writer)
+    fn write_value<W: StreamingWriter>(val: Self, writer: &mut W) -> Result<(), W::Error> {
+        SerializeValue::write_value(if val { 1i8 } else { 0i8 }, writer)
     }
 }
