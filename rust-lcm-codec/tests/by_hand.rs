@@ -114,6 +114,14 @@ impl<'a, W: StreamingWriter> Iterator for WithArray_Write_vals<'a, W> {
         if self.current_count < self.expected_count {
             unsafe {
                 Some(WithArray_Write_vals_Item {
+                    // We cheat here to allow normally-evil
+                    // multiple parent-mutable references because we know that
+                    // the generated code in the child acts on the parent in a
+                    // convergent manner:
+                    // * Each child consumes itself when it exercises its only method,
+                    //   and is thus limited to a single shot at mutating the parent.
+                    // * The child mutation of the parent is gated on boundary checks in the parent
+                    //   (max child operations and the underlying writer bounds checks)
                     parent: core::mem::transmute(self),
                 })
             }

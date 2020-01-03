@@ -731,6 +731,13 @@ fn emit_writer_field_state_transition_array(
             type Item = #item_writer_struct_ident<'a, W>;
             fn next(&mut self) -> Option<Self::Item> {
                 if #top_level_under_len_check {
+                    // We cheat here to allow normally-evil multiple parent-mutable
+                    // references because we know that the generated code in the
+                    // child acts on the parent in a convergent manner:
+                    // * Each child consumes itself when it exercises its only method,
+                    //   and is thus limited to a single shot at mutating the parent.
+                    // * The child mutation of the parent is gated on boundary checks in the parent
+                    //   (max child operations and the underlying writer bounds checks)
                     unsafe {
                         Some(#item_writer_struct_ident {
                             parent: core::mem::transmute(self),
@@ -814,6 +821,7 @@ fn emit_reader_state_transition(
                     let read_methods = match pt {
                         PrimitiveType::String => quote! {
                             pub fn #read_method_ident(self) -> Result<(&'a #rust_field_type, #next_type<'a, R>), rust_lcm_codec::DecodeValueError<R::Error>> {
+                                // Use transmute to link the generated string reference to the underlying Reader's lifetime
                                 let v = unsafe { core::mem::transmute(rust_lcm_codec::read_str_value(self.reader)?) };
                                 Ok((v, #next_state))
                             }
@@ -898,6 +906,7 @@ fn emit_reader_state_transition(
                                 PrimitiveType::String => quote! {
                                     pub fn #read_method_ident(self) -> Result<&'a #rust_field_type, rust_lcm_codec::DecodeValueError<R::Error>> {
                                         #pre_field_read
+                                        // Use transmute to link the generated string reference to the underlying Reader's lifetime
                                         let v = unsafe { core::mem::transmute(rust_lcm_codec::read_str_value(self.parent.reader)?) };
                                         #post_field_read
                                         Ok(v)
@@ -954,6 +963,13 @@ fn emit_reader_state_transition(
                             type Item = #item_reader_struct_ident<'a, R>;
                             fn next(&mut self) -> Option<Self::Item> {
                                 if #top_level_under_len_check {
+                                    // We cheat here to allow normally-evil multiple parent-mutable
+                                    // references because we know that the generated code in the
+                                    // child acts on the parent in a convergent manner:
+                                    // * Each child consumes itself when it exercises its only method,
+                                    //   and is thus limited to a single shot at mutating the parent.
+                                    // * The child mutation of the parent is gated on boundary checks in the parent
+                                    //   (max child operations and the underlying reader bounds checks)
                                     unsafe {
                                         Some(#item_reader_struct_ident {
                                             parent: core::mem::transmute(self),

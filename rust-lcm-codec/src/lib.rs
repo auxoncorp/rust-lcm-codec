@@ -77,7 +77,14 @@ impl<'a> StreamingReader for BufferReader<'a> {
     fn share_bytes(&mut self, len: usize) -> Result<&[u8], Self::Error> {
         let end = self.cursor + len;
         if end <= self.buffer.len() {
-            //buf.copy_from_slice(&self.buffer[self.cursor..end]);
+            // This is unsafe because we are providing a shared a shareable immutable reference
+            // to a part of a slice we currently holding a mutable (read: unshareable, solitary)
+            // reference to via the lifetime from `&mut self`.
+            //
+            // We know that this type will not in fact be able to mutate the byte slice underneath
+            // that shared immutable reference because the BufferRead operates solely in a forward
+            // fashion and the cursor is moved past the immutable region. It helps that we also
+            // never mutate the underlying buffer anyhow.
             let s =
                 unsafe { core::slice::from_raw_parts(self.buffer.as_ptr().add(self.cursor), len) };
             self.cursor += len;
