@@ -35,8 +35,8 @@ fn prim_test_read_direct() -> Result<(), TestError> {
     let mut buf = [0u8; 256];
     {
         let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
-        let pw = generated::primitives::Primitives_t::begin_write(&mut w)?;
-        let _write_done: generated::primitives::primitives_t_Write_DONE<_> = pw
+        let pw = generated::primitives::begin_primitives_t_write(&mut w)?;
+        let _write_done: generated::primitives::primitives_t_write_done<_> = pw
             .write_int8_field(1)?
             .write_int16_field(2)?
             .write_int32_field(3)?
@@ -48,7 +48,7 @@ fn prim_test_read_direct() -> Result<(), TestError> {
             .write_byte_field(8)?;
     }
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
-    let pr = generated::primitives::Primitives_t::begin_read(&mut r)?;
+    let pr = generated::primitives::begin_primitives_t_read(&mut r)?;
     let (int8_field, pr) = pr.read_int8_field()?;
     let (int16_field, pr) = pr.read_int16_field()?;
     let (int32_field, pr) = pr.read_int32_field()?;
@@ -58,7 +58,7 @@ fn prim_test_read_direct() -> Result<(), TestError> {
     let (string_field, pr) = pr.read_string_field()?;
     let (bool_field, pr) = pr.read_bool_field()?;
     let (byte_field, pr) = pr.read_byte_field()?;
-    let _read_done: generated::primitives::primitives_t_Read_DONE<_> = pr;
+    let _read_done: generated::primitives::primitives_t_read_done<_> = pr;
     assert_eq!(1, int8_field);
     assert_eq!(2, int16_field);
     assert_eq!(3, int32_field);

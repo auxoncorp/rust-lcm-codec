@@ -42,8 +42,8 @@ fn nested_round_trip_happy_path() -> Result<(), TestError> {
     let mut buf = [0u8; 256];
     {
         let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
-        let pw = generated::nested::Local_nested_t::begin_write(&mut w)?;
-        let _write_done: generated::nested::local_nested_t_Write_DONE<_> = pw
+        let pw = generated::nested::begin_local_nested_t_write(&mut w)?;
+        let _write_done: generated::nested::local_nested_t_write_done<_> = pw
             .write_j(1)?
             .write_k(|local_primitive_write_ready| {
                 Ok(local_primitive_write_ready.write_m(2)?.write_n(3)?)
@@ -51,7 +51,7 @@ fn nested_round_trip_happy_path() -> Result<(), TestError> {
             .write_p(4)?;
     }
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
-    let pr = generated::nested::Local_nested_t::begin_read(&mut r)?;
+    let pr = generated::nested::begin_local_nested_t_read(&mut r)?;
     let mut found_m = Default::default();
     let mut found_n = Default::default();
     let (found_j, pr) = pr.read_j()?;
@@ -63,7 +63,7 @@ fn nested_round_trip_happy_path() -> Result<(), TestError> {
         Ok(field_reader)
     })?;
     let (found_p, pr) = pr.read_p()?;
-    let _read_done: generated::nested::local_nested_t_Read_DONE<_> = pr;
+    let _read_done: generated::nested::local_nested_t_read_done<_> = pr;
     assert_eq!(1, found_j);
     assert_eq!(2, found_m);
     assert_eq!(3, found_n);
@@ -76,8 +76,8 @@ fn nested_remote_package_field_round_trip_happy_path() -> Result<(), TestError> 
     let mut buf = [0u8; 256];
     {
         let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
-        let pw = generated::nested::Remote_nested_t::begin_write(&mut w)?;
-        let _write_done: generated::nested::remote_nested_t_Write_DONE<_> = pw
+        let pw = generated::nested::begin_remote_nested_t_write(&mut w)?;
+        let _write_done: generated::nested::remote_nested_t_write_done<_> = pw
             .write_j(1)?
             .write_k(|local_primitive_write_ready| {
                 Ok(local_primitive_write_ready
@@ -87,7 +87,7 @@ fn nested_remote_package_field_round_trip_happy_path() -> Result<(), TestError> 
             .write_p(4)?;
     }
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
-    let pr = generated::nested::Remote_nested_t::begin_read(&mut r)?;
+    let pr = generated::nested::begin_remote_nested_t_read(&mut r)?;
     let mut found_utime = Default::default();
     let mut found_deg_celsius = Default::default();
     let (found_j, pr) = pr.read_j()?;
@@ -99,7 +99,7 @@ fn nested_remote_package_field_round_trip_happy_path() -> Result<(), TestError> 
         Ok(field_reader)
     })?;
     let (found_p, pr) = pr.read_p()?;
-    let _read_done: generated::nested::remote_nested_t_Read_DONE<_> = pr;
+    let _read_done: generated::nested::remote_nested_t_read_done<_> = pr;
     assert_eq!(1, found_j);
     assert_eq!(2, found_utime);
     assert_eq!(3.0, found_deg_celsius);

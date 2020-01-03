@@ -142,9 +142,7 @@ impl<'a> StreamingWriter for BufferWriter<'a> {
 
 // Value serialization trait
 pub trait SerializeValue: Sized {
-    fn read_new_value<R: StreamingReader>(
-        reader: &mut R,
-    ) -> Result<Self, DecodeValueError<R::Error>>;
+    fn read_value<R: StreamingReader>(reader: &mut R) -> Result<Self, DecodeValueError<R::Error>>;
     fn write_value<W: StreamingWriter>(val: Self, writer: &mut W) -> Result<(), W::Error>;
 }
 
@@ -152,7 +150,7 @@ macro_rules! primitive_serialize_impl {
     ($ty:ty) => {
         impl SerializeValue for $ty {
             #[inline(always)]
-            fn read_new_value<R: StreamingReader>(
+            fn read_value<R: StreamingReader>(
                 reader: &mut R,
             ) -> Result<Self, DecodeValueError<R::Error>> {
                 let mut bytes = Self::default().to_ne_bytes();
@@ -185,7 +183,7 @@ pub fn write_str_value<W: StreamingWriter>(string: &str, writer: &mut W) -> Resu
 pub fn read_str_value<R: StreamingReader>(
     reader: &mut R,
 ) -> Result<&str, DecodeValueError<<R as StreamingReader>::Error>> {
-    let len: i32 = i32::read_new_value(reader)?;
+    let len: i32 = i32::read_value(reader)?;
     if len < 0 {
         return Err(DecodeValueError::InvalidValue("str length was less than 0"));
     }
@@ -200,7 +198,7 @@ pub fn read_str_value<R: StreamingReader>(
 }
 
 impl SerializeValue for bool {
-    fn read_new_value<R: StreamingReader>(
+    fn read_value<R: StreamingReader>(
         reader: &mut R,
     ) -> Result<Self, DecodeValueError<<R as StreamingReader>::Error>> {
         let mut buffer = [0u8; 1];

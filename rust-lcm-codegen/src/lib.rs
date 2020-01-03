@@ -12,9 +12,6 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::process::Command;
 
-const STATE_NAME_READY: &str = "READY";
-const STATE_NAME_DONE: &str = "DONE";
-
 pub fn generate<'a, P1: AsRef<Path>, SF: IntoIterator<Item = P1>, P2: AsRef<Path>>(
     schema_files: SF,
     out_file_path: P2,
@@ -94,9 +91,9 @@ enum StateName {
 impl StateName {
     fn name(&self) -> &str {
         match self {
-            StateName::Ready => STATE_NAME_READY,
+            StateName::Ready => "ready",
             StateName::HandlingField(s) => s.as_str(),
-            StateName::Done => STATE_NAME_DONE,
+            StateName::Done => "done",
         }
     }
 }
@@ -118,10 +115,10 @@ struct CodecState {
 
 impl CodecState {
     fn writer_struct_state_decl_ident(struct_name: &str, state_name: &StateName) -> Ident {
-        format_ident!("{}_Write_{}", struct_name, state_name.name())
+        format_ident!("{}_write_{}", struct_name, state_name.name())
     }
     fn reader_struct_state_decl_ident(struct_name: &str, state_name: &StateName) -> Ident {
-        format_ident!("{}_Read_{}", struct_name, state_name.name())
+        format_ident!("{}_read_{}", struct_name, state_name.name())
     }
     fn writer_ident(&self) -> Ident {
         CodecState::writer_struct_state_decl_ident(&self.struct_name, &self.state_name)
@@ -195,19 +192,16 @@ fn emit_struct(s: &parser::Struct, env: &fingerprint::Environment) -> TokenStrea
         }
     }
 
-    let mut main_struct_name = s.name.clone();
-    main_struct_name[0..1].make_ascii_uppercase();
-    let main_struct = format_ident!("{}", main_struct_name);
     let write_ready_type = codec_states[0].writer_ident();
     let read_ready_type = codec_states[0].reader_ident();
+    let begin_write = format_ident!("begin_{}_write", s.name);
+    let begin_read = format_ident!("begin_{}_read", s.name);
 
     quote! {
         pub const #schema_hash_ident : u64 = #schema_hash;
 
-        pub struct #main_struct { }
-        impl #main_struct {
             #[inline(always)]
-            pub fn begin_write<'a, W: rust_lcm_codec::StreamingWriter>(writer: &'a mut W)
+            pub fn #begin_write<'a, W: rust_lcm_codec::StreamingWriter>(writer: &'a mut W)
                     -> Result<#write_ready_type<'a, W>, W::Error> {
                 writer.write_bytes(&#schema_hash.to_be_bytes())?;
 
@@ -215,7 +209,8 @@ fn emit_struct(s: &parser::Struct, env: &fingerprint::Environment) -> TokenStrea
                     writer
                 })
             }
-            pub fn begin_read<'a, R: rust_lcm_codec::StreamingReader>(reader: &'a mut R)
+            #[inline(always)]
+            pub fn #begin_read<'a, R: rust_lcm_codec::StreamingReader>(reader: &'a mut R)
                     -> Result<#read_ready_type<'a, R>, rust_lcm_codec::DecodeFingerprintError<R::Error>> {
                 let mut hash_buffer = 0u64.to_ne_bytes();
                 reader.read_bytes(&mut hash_buffer)?;
@@ -228,7 +223,6 @@ fn emit_struct(s: &parser::Struct, env: &fingerprint::Environment) -> TokenStrea
                     reader
                 })
             }
-        }
 
         #( #writer_states_decl_code )*
 
@@ -841,8 +835,7 @@ fn emit_reader_state_transition(
                             };
                             quote! {
                                 pub fn #read_method_ident(self) -> Result<(#rust_field_type, #next_type<'a, R>), rust_lcm_codec::DecodeValueError<R::Error>> {
-                                    use rust_lcm_codec::SerializeValue;
-                                    let v = SerializeValue::read_new_value(self.reader)?;
+                                    let v = rust_lcm_codec::SerializeValue::read_value(self.reader)?;
                                     Ok((v, #next_state))
                                 }
                             }
@@ -915,8 +908,7 @@ fn emit_reader_state_transition(
                                 _ => quote! {
                                     pub fn #read_method_ident(self) -> Result<#rust_field_type, rust_lcm_codec::DecodeValueError<R::Error>> {
                                         #pre_field_read
-                                        use rust_lcm_codec::SerializeValue;
-                                        let v = SerializeValue::read_new_value(self.parent.reader)?;
+                                        let v = rust_lcm_codec::SerializeValue::read_value(self.parent.reader)?;
                                         #post_field_read
                                         Ok(v)
                                     }

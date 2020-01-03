@@ -66,8 +66,8 @@ fn nested_list_round_trip_happy_path() -> Result<(), TestError> {
     let mut buf = [0u8; 256];
     {
         let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
-        let pw = generated::nested_list::Nested_list_t::begin_write(&mut w)?;
-        let mut pw: generated::nested_list::nested_list_t_Write_segments<_> = pw
+        let pw = generated::nested_list::begin_nested_list_t_write(&mut w)?;
+        let mut pw: generated::nested_list::nested_list_t_write_segments<_> = pw
             .write_arbitrary(input.arbitrary)?
             .write_nsegments(input.segments.len() as i32)?;
         // Use the point-list writer at the array-writing state as an iterator
@@ -92,10 +92,10 @@ fn nested_list_round_trip_happy_path() -> Result<(), TestError> {
             })?;
         }
         //let pw: generated::nested_list::nested_list_t_Write_points<_> = pw;
-        let _write_done: generated::nested_list::nested_list_t_Write_DONE<_> = pw.done()?;
+        let _write_done: generated::nested_list::nested_list_t_write_done<_> = pw.done()?;
     }
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
-    let pr = generated::nested_list::Nested_list_t::begin_read(&mut r)?;
+    let pr = generated::nested_list::begin_nested_list_t_read(&mut r)?;
     let mut output = Message::default();
     let (found_arbitrary, pr) = pr.read_arbitrary()?;
     output.arbitrary = found_arbitrary;
