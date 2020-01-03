@@ -1,0 +1,23 @@
+package nested_list;
+
+struct nested_list_t
+{
+    byte arbitrary;
+    int32_t nsegments;
+    segment_t segments[nsegments];
+}
+
+struct pair_t
+{
+    int64_t left;
+    double right;
+}
+
+struct segment_t
+{
+    int32_t nsingles;
+    int32_t singles[nsingles];
+
+    int32_t npairs;
+    pair_t pairs[npairs];
+}

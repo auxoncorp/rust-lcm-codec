@@ -1,0 +1,27 @@
+package single_dimension_list;
+
+struct point_list_t
+{
+    int32_t npoints;
+    double  points[npoints];
+}
+
+struct pair_t
+{
+    int32_t left;
+    int32_t right;
+}
+
+struct struct_list_t
+{
+    int32_t npairs;
+    pair_t pairs[npairs];
+}
+
+struct morse_segment_t
+{
+    int32_t ndots;
+    int32_t ndashes;
+    int32_t dots[ndots];
+    int8_t dashes[ndashes];
+}
