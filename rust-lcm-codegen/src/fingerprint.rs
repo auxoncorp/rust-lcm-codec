@@ -6,7 +6,7 @@ use crate::parser::{self, Schema};
 
 // Hashing operations
 
-const INITIAL_STRUCT_HASH: i64 = 0x12345678i64;
+const INITIAL_STRUCT_HASH: i64 = 0x12_345_678i64;
 
 fn hash_update(v: i64, c: i8) -> i64 {
     ((v << 8) ^ (v >> 55)).wrapping_add(c as i64)
@@ -44,7 +44,7 @@ fn dimension_id_for_hash(d: &parser::ArrayDimension) -> i8 {
 
 fn dimension_name_for_hash(d: &parser::ArrayDimension) -> String {
     match d {
-        parser::ArrayDimension::Static { size } => format!("{}", size).to_owned(),
+        parser::ArrayDimension::Static { size } => format!("{}", size),
         parser::ArrayDimension::Dynamic { field_name } => field_name.to_owned(),
     }
 }
@@ -82,9 +82,7 @@ fn struct_base_hash(s: &parser::Struct) -> u64 {
     v as u64
 }
 
-fn struct_child_struct_types<'a>(
-    s: &parser::Struct,
-) -> impl Iterator<Item = parser::StructType> + '_ {
+fn struct_child_struct_types(s: &parser::Struct) -> impl Iterator<Item = parser::StructType> + '_ {
     s.members.iter().flat_map(|mem| match mem {
         parser::StructMember::Const(_) => None,
         parser::StructMember::Field(f) => match &f.ty {
@@ -127,7 +125,7 @@ impl Environment {
                         None => (),
                     }
                 }
-                return None;
+                None
             }
         }
     }
@@ -143,7 +141,7 @@ fn struct_hash_internal(s: &parser::Struct, env: &Environment, mut stack: &mut V
     for st in struct_child_struct_types(s) {
         let resolved_struct = env
             .resolve_struct_type(&st)
-            .expect(&format!("Can't resolve struct type {:?}", st));
+            .unwrap_or_else(|| panic!("Can't resolve struct type {:?}", st));
         v = v.wrapping_add(struct_hash_internal(&resolved_struct, env, &mut stack));
     }
     stack.pop();

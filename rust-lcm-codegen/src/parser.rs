@@ -286,7 +286,7 @@ pub fn field_decl(input: &str) -> IResult<&str, Field> {
     let (input, name) = ident(input)?;
     let (input, dims) = many0(array_dimension)(input)?;
 
-    if dims.len() > 0 {
+    if !dims.is_empty() {
         ty = Type::Array(ArrayType {
             item_type: Box::new(ty),
             dimensions: dims,

@@ -12,7 +12,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::process::Command;
 
-pub fn generate<'a, P1: AsRef<Path>, SF: IntoIterator<Item = P1>, P2: AsRef<Path>>(
+pub fn generate<P1: AsRef<Path>, SF: IntoIterator<Item = P1>, P2: AsRef<Path>>(
     schema_files: SF,
     out_file_path: P2,
 ) {
@@ -48,7 +48,6 @@ pub fn generate<'a, P1: AsRef<Path>, SF: IntoIterator<Item = P1>, P2: AsRef<Path
     };
 
     write!(out_file, "{}", tokens).expect("Write out file");
-    println!("{}", out_file_path.display());
     rustfmt(out_file_path);
 }
 
@@ -136,7 +135,7 @@ struct BaggageDimension {
 }
 
 impl BaggageDimension {
-    fn as_field_declarations(baggage_dimensions: &[BaggageDimension]) -> Vec<TokenStream> {
+    fn field_declarations(baggage_dimensions: &[BaggageDimension]) -> Vec<TokenStream> {
         baggage_dimensions
             .iter()
             .map(|d| {
@@ -145,7 +144,7 @@ impl BaggageDimension {
             })
             .collect()
     }
-    fn as_field_initializations_from_self<'a>(
+    fn field_initializations_from_self<'a>(
         baggage_dimensions: impl IntoIterator<Item = &'a BaggageDimension>,
     ) -> Vec<TokenStream> {
         baggage_dimensions
@@ -158,12 +157,36 @@ impl BaggageDimension {
     }
 }
 
+fn to_underscored_literal(v: u64) -> proc_macro2::Literal {
+    use std::str::FromStr;
+    let raw = format!("{}", v);
+    let original_len = raw.len();
+    let mut s = String::with_capacity(original_len);
+    for (index, digit) in raw.chars().rev().enumerate() {
+        if index % 3 == 0 && index != 0 && index != original_len {
+            s.insert(0, '_')
+        }
+        s.insert(0, digit)
+    }
+    s.push_str("u64");
+    if let proc_macro2::TokenTree::Literal(l) = proc_macro2::TokenStream::from_str(&s)
+        .expect("Invalid underscored literal creation, failed lexing")
+        .into_iter()
+        .next()
+        .expect("Should have made at least one token")
+    {
+        l
+    } else {
+        panic!("Created the wrong type of token when trying to make an underscored literal")
+    }
+}
+
 fn emit_struct(s: &parser::Struct, env: &fingerprint::Environment) -> TokenStream {
     let schema_hash_ident = format_ident!("{}_SCHEMA_HASH", s.name.to_uppercase());
     let schema_hash = fingerprint::struct_hash(&s, &env);
+    let schema_hash = to_underscored_literal(schema_hash);
+
     let codec_states = gather_states(s);
-    eprintln!("----- {} ---- ", s.name);
-    eprintln!("Codec states look like: {:#?}", codec_states);
 
     let writer_states_decl_code = codec_states
         .iter()
@@ -201,8 +224,8 @@ fn emit_struct(s: &parser::Struct, env: &fingerprint::Environment) -> TokenStrea
         pub const #schema_hash_ident : u64 = #schema_hash;
 
             #[inline(always)]
-            pub fn #begin_write<'a, W: rust_lcm_codec::StreamingWriter>(writer: &'a mut W)
-                    -> Result<#write_ready_type<'a, W>, W::Error> {
+            pub fn #begin_write<W: rust_lcm_codec::StreamingWriter>(writer: &'_ mut W)
+                    -> Result<#write_ready_type<'_, W>, W::Error> {
                 writer.write_bytes(&#schema_hash.to_be_bytes())?;
 
                 Ok(#write_ready_type {
@@ -210,8 +233,8 @@ fn emit_struct(s: &parser::Struct, env: &fingerprint::Environment) -> TokenStrea
                 })
             }
             #[inline(always)]
-            pub fn #begin_read<'a, R: rust_lcm_codec::StreamingReader>(reader: &'a mut R)
-                    -> Result<#read_ready_type<'a, R>, rust_lcm_codec::DecodeFingerprintError<R::Error>> {
+            pub fn #begin_read<R: rust_lcm_codec::StreamingReader>(reader: &'_ mut R)
+                    -> Result<#read_ready_type<'_, R>, rust_lcm_codec::DecodeFingerprintError<R::Error>> {
                 let mut hash_buffer = 0u64.to_ne_bytes();
                 reader.read_bytes(&mut hash_buffer)?;
                 let found_hash = u64::from_be_bytes(hash_buffer);
@@ -278,11 +301,6 @@ fn gather_states(s: &parser::Struct) -> Vec<CodecState> {
                 // keep tracking it
                 let bd = baggage_dimensions.remove(bi);
                 field_serves_as_dimension = true;
-                eprintln!(
-                    "Removing {:?} after inserting state for field {}",
-                    bd,
-                    f.name.as_str()
-                );
             }
             codec_states.insert(
                 0,
@@ -309,7 +327,7 @@ fn emit_writer_state_decl(ws: &CodecState, env: &fingerprint::Environment) -> To
     } else {
         None
     };
-    let dimensions_fields = BaggageDimension::as_field_declarations(&ws.baggage_dimensions);
+    let dimensions_fields = BaggageDimension::field_declarations(&ws.baggage_dimensions);
     let (current_iter_count_field, array_item_writer_decl) = if let Some((
         parser::Field {
             ty: parser::Type::Array(at),
@@ -318,10 +336,12 @@ fn emit_writer_state_decl(ws: &CodecState, env: &fingerprint::Environment) -> To
         _,
     )) = &ws.field
     {
-        let current_count_field_ident = array_current_count_field_ident(name.as_str(), 0, at)
+        let current_count_field_ident = at
+            .array_current_count_field_ident(name.as_str(), 0)
             .expect("Arrays must have at least one dimension");
-        let item_writer_struct_ident = format_ident!("{}_Item", struct_ident);
+        let item_writer_struct_ident = format_ident!("{}_item", struct_ident);
         let array_item_writer_decl = quote! {
+            #[must_use]
             pub struct #item_writer_struct_ident<'a, W: rust_lcm_codec::StreamingWriter> {
                 parent: &'a mut #struct_ident<'a, W>,
             }
@@ -333,7 +353,13 @@ fn emit_writer_state_decl(ws: &CodecState, env: &fingerprint::Environment) -> To
     } else {
         (None, None)
     };
+    let maybe_must_use = if ws.state_name != StateName::Done {
+        Some(quote!(#[must_use]))
+    } else {
+        None
+    };
     quote! {
+        #maybe_must_use
         pub struct #struct_ident<'a, W: rust_lcm_codec::StreamingWriter> {
             #allow_dead
             pub(super) writer: &'a mut W,
@@ -352,7 +378,7 @@ fn emit_reader_state_decl(rs: &CodecState, env: &fingerprint::Environment) -> To
     } else {
         None
     };
-    let dimensions_fields = BaggageDimension::as_field_declarations(&rs.baggage_dimensions);
+    let dimensions_fields = BaggageDimension::field_declarations(&rs.baggage_dimensions);
     let (current_iter_count_field, array_item_reader_decl) = if let Some((
         parser::Field {
             ty: parser::Type::Array(at),
@@ -361,10 +387,12 @@ fn emit_reader_state_decl(rs: &CodecState, env: &fingerprint::Environment) -> To
         _,
     )) = &rs.field
     {
-        let current_count_field_ident = array_current_count_field_ident(name.as_str(), 0, at)
+        let current_count_field_ident = at
+            .array_current_count_field_ident(name.as_str(), 0)
             .expect("Arrays must have at least one dimension");
-        let item_reader_struct_ident = format_ident!("{}_Item", struct_ident);
+        let item_reader_struct_ident = format_ident!("{}_item", struct_ident);
         let array_item_reader_decl = quote! {
+            #[must_use]
             pub struct #item_reader_struct_ident<'a, R: rust_lcm_codec::StreamingReader> {
                 parent: &'a mut #struct_ident<'a, R>,
             }
@@ -376,7 +404,13 @@ fn emit_reader_state_decl(rs: &CodecState, env: &fingerprint::Environment) -> To
     } else {
         (None, None)
     };
+    let maybe_must_use = if rs.state_name != StateName::Done {
+        Some(quote!(#[must_use]))
+    } else {
+        None
+    };
     quote! {
+        #maybe_must_use
         pub struct #struct_ident<'a, W: rust_lcm_codec::StreamingReader> {
             #allow_dead
             pub(super) reader: &'a mut W,
@@ -417,7 +451,7 @@ fn emit_writer_state_transition(
                     start_type,
                     ws_next,
                     f.name.as_str(),
-                    pt,
+                    *pt,
                     serves_as_dimension,
                 ),
                 parser::Type::Struct(st) => emit_writer_field_state_transition_struct(
@@ -454,7 +488,7 @@ impl WriterPath {
         }
     }
 }
-fn emit_write_primitive_invocation(pt: &PrimitiveType, writer_path: WriterPath) -> TokenStream {
+fn emit_write_primitive_invocation(pt: PrimitiveType, writer_path: WriterPath) -> TokenStream {
     let path = writer_path.path();
     match pt {
         PrimitiveType::String => quote! {
@@ -477,7 +511,8 @@ fn emit_next_field_current_iter_count_initialization(
         _,
     )) = &next_state.field
     {
-        let current_iter_count_field_ident = array_current_count_field_ident(name.as_str(), 0, at)
+        let current_iter_count_field_ident = at
+            .array_current_count_field_ident(name.as_str(), 0)
             .expect("Arrays must have at least one dimension");
         Some(quote!(#current_iter_count_field_ident: 0, ))
     } else {
@@ -489,12 +524,12 @@ fn emit_writer_field_state_transition_primitive(
     start_type: Ident,
     next_state: &CodecState,
     field_name: &str,
-    pt: &PrimitiveType,
+    pt: PrimitiveType,
     field_serves_as_dimension: bool,
 ) -> TokenStream {
     let write_method_ident = format_ident!("write_{}", field_name);
     let write_method = {
-        let maybe_ref = if *pt == PrimitiveType::String {
+        let maybe_ref = if pt == PrimitiveType::String {
             Some(quote!(&))
         } else {
             None
@@ -508,7 +543,7 @@ fn emit_writer_field_state_transition_primitive(
             None
         };
         let next_type = next_state.writer_ident();
-        let next_dimensions_fields = BaggageDimension::as_field_initializations_from_self(
+        let next_dimensions_fields = BaggageDimension::field_initializations_from_self(
             next_state
                 .baggage_dimensions
                 .iter()
@@ -587,7 +622,7 @@ fn emit_writer_field_state_transition_struct(
     let current_iter_count_initialization =
         emit_next_field_current_iter_count_initialization(next_state);
     let next_dimensions_fields =
-        BaggageDimension::as_field_initializations_from_self(&next_state.baggage_dimensions);
+        BaggageDimension::field_initializations_from_self(&next_state.baggage_dimensions);
     let after_field_constructor = quote! {
                 #next_type {
                     writer: done.writer,
@@ -612,45 +647,85 @@ fn emit_writer_field_state_transition_struct(
     }
 }
 
-fn array_current_count_field_ident(
-    array_field_name: &str,
-    index: usize,
-    array_type: &ArrayType,
-) -> Option<Ident> {
-    match &array_type.dimensions.get(index) {
-        Some(ArrayDimension::Static { size }) => {
-            // Use the field_name of the array
-            Some(format_ident!("current_{}_count", array_field_name))
+impl ArrayType {
+    fn array_current_count_field_ident(
+        &self,
+        array_field_name: &str,
+        index: usize,
+    ) -> Option<Ident> {
+        match self.dimensions.get(index) {
+            Some(ArrayDimension::Static { size }) => {
+                // Use the field_name of the array
+                Some(format_ident!("current_{}_count", array_field_name))
+            }
+            Some(ArrayDimension::Dynamic { field_name }) => {
+                // Use the field_name of the field supplying the dynamic array length
+                Some(format_ident!("current_{}_count", field_name))
+            }
+            None => None,
         }
-        Some(ArrayDimension::Dynamic { field_name }) => {
-            // Use the field_name of the field supplying the dynamic array length
-            Some(format_ident!("current_{}_count", field_name))
+    }
+    fn array_current_count_gte_expected_check(
+        &self,
+        array_field_name: &str,
+        index: usize,
+        use_parent: bool,
+    ) -> Option<TokenStream> {
+        self.array_current_count_vs_expected(array_field_name, index, use_parent)
+            .map(
+                |CountComparisonParts {
+                     current_count,
+                     expected_count,
+                 }| quote!(#current_count >= #expected_count ),
+            )
+    }
+    fn array_current_count_under_expected_check(
+        &self,
+        array_field_name: &str,
+        index: usize,
+        use_parent: bool,
+    ) -> Option<TokenStream> {
+        self.array_current_count_vs_expected(array_field_name, index, use_parent)
+            .map(
+                |CountComparisonParts {
+                     current_count,
+                     expected_count,
+                 }| quote!(#current_count < #expected_count ),
+            )
+    }
+
+    fn array_current_count_vs_expected(
+        &self,
+        array_field_name: &str,
+        index: usize,
+        use_parent: bool,
+    ) -> Option<CountComparisonParts> {
+        let current_count_ident = self.array_current_count_field_ident(array_field_name, index)?;
+        let path_prefix = if use_parent {
+            quote!(self.parent)
+        } else {
+            quote!(self)
+        };
+        match self.dimensions.get(index) {
+            Some(ArrayDimension::Static { size }) => Some(CountComparisonParts {
+                current_count: quote!(#path_prefix.#current_count_ident),
+                expected_count: quote!(#size),
+            }),
+            Some(ArrayDimension::Dynamic { field_name }) => {
+                let expected_count_ident = format_ident!("baggage_{}", field_name);
+                Some(CountComparisonParts {
+                    current_count: quote!(#path_prefix.#current_count_ident),
+                    expected_count: quote!(#path_prefix.#expected_count_ident),
+                })
+            }
+            None => None,
         }
-        None => None,
     }
 }
-fn array_current_count_under_expected_check(
-    array_field_name: &str,
-    index: usize,
-    array_type: &ArrayType,
-    use_parent: bool,
-) -> Option<TokenStream> {
-    let current_count_ident = array_current_count_field_ident(array_field_name, index, array_type)?;
-    let path_prefix = if use_parent {
-        quote!(self.parent)
-    } else {
-        quote!(self)
-    };
-    match array_type.dimensions.get(index) {
-        Some(ArrayDimension::Static { size }) => {
-            Some(quote!(#path_prefix.#current_count_ident == #size))
-        }
-        Some(ArrayDimension::Dynamic { field_name }) => {
-            let expected_count_ident = format_ident!("baggage_{}", field_name);
-            Some(quote!(#path_prefix.#current_count_ident < #path_prefix.#expected_count_ident))
-        }
-        None => None,
-    }
+
+struct CountComparisonParts {
+    current_count: TokenStream,
+    expected_count: TokenStream,
 }
 
 /// The goal here is to make this current state implement an Iterator
@@ -667,19 +742,20 @@ fn emit_writer_field_state_transition_array(
     field_name: &str,
     at: &ArrayType,
 ) -> TokenStream {
-    let current_count_ident = array_current_count_field_ident(field_name, 0, at)
+    let current_count_ident = at
+        .array_current_count_field_ident(field_name, 0)
         .expect("Arrays should have at least one dimension");
     let next_type = next_state.writer_ident();
     let next_dimensions_fields =
-        BaggageDimension::as_field_initializations_from_self(&next_state.baggage_dimensions);
-    let item_writer_struct_ident = format_ident!("{}_Item", start_type);
+        BaggageDimension::field_initializations_from_self(&next_state.baggage_dimensions);
+    let item_writer_struct_ident = format_ident!("{}_item", start_type);
     let write_item_method_ident = format_ident!("write");
 
-    let item_writer_under_len_check =
-        array_current_count_under_expected_check(field_name, 0, at, true)
-            .expect("Arrays should have at least one dimension");
+    let item_writer_over_len_check = at
+        .array_current_count_gte_expected_check(field_name, 0, true)
+        .expect("Arrays should have at least one dimension");
     let pre_field_write = Some(quote! {
-        if !(#item_writer_under_len_check) {
+        if #item_writer_over_len_check {
             Err(rust_lcm_codec::EncodeValueError::ArrayLengthMismatch(
                 "array length mismatch discovered while iterating",
             ))?;
@@ -696,7 +772,7 @@ fn emit_writer_field_state_transition_array(
                 None
             };
             let rust_field_type = Some(format_ident!("{}", primitive_type_to_rust(&pt)));
-            let write_invocation = emit_write_primitive_invocation(pt, WriterPath::ViaSelfParent);
+            let write_invocation = emit_write_primitive_invocation(*pt, WriterPath::ViaSelfParent);
             quote! {
                 pub fn #write_item_method_ident(self, val: #maybe_ref #rust_field_type) -> Result<(), rust_lcm_codec::EncodeValueError<W::Error>> {
                     #pre_field_write
@@ -724,9 +800,9 @@ fn emit_writer_field_state_transition_array(
 
     let current_iter_count_initialization =
         emit_next_field_current_iter_count_initialization(next_state);
-    let top_level_under_len_check =
-        array_current_count_under_expected_check(field_name, 0, at, false)
-            .expect("Arrays should have at least one dimension");
+    let top_level_under_len_check = at
+        .array_current_count_under_expected_check(field_name, 0, false)
+        .expect("Arrays should have at least one dimension");
     // TODO - create location-specific error message for array length mismatch
     quote! {
 
@@ -795,7 +871,7 @@ fn emit_reader_state_transition(
             let start_type = rs.reader_ident();
             let next_type = next_state.reader_ident();
             let read_method_ident = format_ident!("read_{}", f.name);
-            let next_dimensions_fields = BaggageDimension::as_field_initializations_from_self(
+            let next_dimensions_fields = BaggageDimension::field_initializations_from_self(
                 next_state.baggage_dimensions.iter().filter(|d| {
                     !field_serves_as_dimension || d.len_field_name.as_str() != f.name.as_str()
                 }),
@@ -878,14 +954,14 @@ fn emit_reader_state_transition(
                 }
                 Type::Array(at) => {
                     let read_method_ident = format_ident!("read");
-                    let current_iter_count_field_ident =
-                        array_current_count_field_ident(f.name.as_str(), 0, at)
-                            .expect("Arrays should have at least one dimension");
-                    let item_reader_under_len_check =
-                        array_current_count_under_expected_check(f.name.as_str(), 0, at, true)
-                            .expect("Arrays should have at least one dimension");
+                    let current_iter_count_field_ident = at
+                        .array_current_count_field_ident(f.name.as_str(), 0)
+                        .expect("Arrays should have at least one dimension");
+                    let item_reader_over_len_check = at
+                        .array_current_count_gte_expected_check(f.name.as_str(), 0, true)
+                        .expect("Arrays should have at least one dimension");
                     let pre_field_read = quote! {
-                        if !(#item_reader_under_len_check) {
+                        if #item_reader_over_len_check {
                             Err(rust_lcm_codec::DecodeValueError::ArrayLengthMismatch(
                                 "array length mismatch discovered while iterating to read",
                             ))?;
@@ -945,11 +1021,11 @@ fn emit_reader_state_transition(
                         }
                         Type::Array(at) => panic!("Multidimensional arrays are not supported yet."),
                     };
-                    let item_reader_struct_ident = format_ident!("{}_Item", start_type);
+                    let item_reader_struct_ident = format_ident!("{}_item", start_type);
                     let read_item_method_ident = format_ident!("read");
-                    let top_level_under_len_check =
-                        array_current_count_under_expected_check(f.name.as_str(), 0, at, false)
-                            .expect("Arrays should have at least one dimension");
+                    let top_level_under_len_check = at
+                        .array_current_count_under_expected_check(f.name.as_str(), 0, false)
+                        .expect("Arrays should have at least one dimension");
                     quote! {
                         impl<'a, R: rust_lcm_codec::StreamingReader> Iterator for #start_type<'a, R> {
                             type Item = #item_reader_struct_ident<'a, R>;
@@ -997,5 +1073,24 @@ fn emit_reader_state_transition(
             }
         }
         None => quote! {},
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn manual_underscore_integer_check() {
+        assert_eq!("0u64", format!("{}", to_underscored_literal(0)));
+        assert_eq!("1u64", format!("{}", to_underscored_literal(1)));
+        assert_eq!("10u64", format!("{}", to_underscored_literal(10)));
+        assert_eq!("100u64", format!("{}", to_underscored_literal(100)));
+        assert_eq!("1_000u64", format!("{}", to_underscored_literal(1_000)));
+        assert_eq!("10_000u64", format!("{}", to_underscored_literal(10_000)));
+        assert_eq!("100_000u64", format!("{}", to_underscored_literal(100_000)));
+        assert_eq!(
+            "1_000_000u64",
+            format!("{}", to_underscored_literal(1_000_000))
+        );
     }
 }

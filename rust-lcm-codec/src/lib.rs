@@ -210,7 +210,7 @@ impl SerializeValue for bool {
         match buffer[0] {
             0 => Ok(false),
             1 => Ok(true),
-            _ => return Err(DecodeValueError::InvalidValue("invalid bool value")),
+            _ => Err(DecodeValueError::InvalidValue("invalid bool value")),
         }
     }
 
