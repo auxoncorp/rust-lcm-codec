@@ -1,3 +1,4 @@
+//! LCM type definition file parser
 use nom::{
     branch::alt,
     bytes::complete::{tag, tag_no_case, take_until, take_while1},

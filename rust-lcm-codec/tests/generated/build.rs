@@ -9,7 +9,6 @@ fn main() {
     println!("cargo:rerun-if-changed=../../src");
     println!("cargo:rerun-if-changed=../../../rust-lcm-codegen");
 
-    // TODO all the schema files
     let schema_files = vec![
         "../schemas/primitives.lcm",
         "../schemas/nested.lcm",
@@ -27,7 +26,4 @@ fn main() {
     out_file
         .read_to_string(&mut out_file_content)
         .expect("read out file");
-
-    // println!("{}", out_file_content);
-    // panic!("In the build.rs!");
 }

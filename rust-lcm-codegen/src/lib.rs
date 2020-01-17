@@ -1,5 +1,7 @@
+//! Code generation for LCM serialization and deserialization in Rust
 #![allow(unused_variables)]
 #![allow(dead_code)]
+#![deny(warnings)]
 
 pub mod fingerprint;
 pub mod parser;
@@ -12,6 +14,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::process::Command;
 
+/// Generate a single Rust file from a collection of LCM schema files.
 pub fn generate<P1: AsRef<Path>, SF: IntoIterator<Item = P1>, P2: AsRef<Path>>(
     schema_files: SF,
     out_file_path: P2,
@@ -35,7 +38,7 @@ pub fn generate<P1: AsRef<Path>, SF: IntoIterator<Item = P1>, P2: AsRef<Path>>(
     // or error out when more than one file declares the same package
 
     let schemas_code = all_schemas.iter().map(|schema| {
-        let env = fingerprint::Environment {
+        let env = Environment {
             local_schema: schema.clone(),
             all_schemas: all_schemas.clone(),
         };
@@ -62,7 +65,7 @@ fn rustfmt<P: AsRef<Path>>(path: P) {
         .expect("rustfmt");
 }
 
-fn emit_schema(schema: &parser::Schema, env: &fingerprint::Environment) -> TokenStream {
+fn emit_schema(schema: &parser::Schema, env: &Environment) -> TokenStream {
     let structs_code = schema.structs.iter().map(|s| emit_struct(s, env));
     match &schema.package {
         Some(name) => {
@@ -181,7 +184,7 @@ fn to_underscored_literal(v: u64) -> proc_macro2::Literal {
     }
 }
 
-fn emit_struct(s: &parser::Struct, env: &fingerprint::Environment) -> TokenStream {
+fn emit_struct(s: &parser::Struct, env: &Environment) -> TokenStream {
     let schema_hash_ident = format_ident!("{}_SCHEMA_HASH", s.name.to_uppercase());
     let schema_hash = fingerprint::struct_hash(&s, &env);
     let schema_hash = to_underscored_literal(schema_hash);
@@ -320,7 +323,7 @@ fn gather_states(s: &parser::Struct) -> Vec<CodecState> {
     codec_states
 }
 
-fn emit_writer_state_decl(ws: &CodecState, env: &fingerprint::Environment) -> TokenStream {
+fn emit_writer_state_decl(ws: &CodecState, env: &Environment) -> TokenStream {
     let struct_ident = ws.writer_ident();
     let allow_dead = if ws.state_name == StateName::Done {
         Some(quote!(#[allow(dead_code)]))
@@ -371,7 +374,7 @@ fn emit_writer_state_decl(ws: &CodecState, env: &fingerprint::Environment) -> To
     }
 }
 
-fn emit_reader_state_decl(rs: &CodecState, env: &fingerprint::Environment) -> TokenStream {
+fn emit_reader_state_decl(rs: &CodecState, env: &Environment) -> TokenStream {
     let struct_ident = rs.reader_ident();
     let allow_dead = if rs.state_name == StateName::Done {
         Some(quote!(#[allow(dead_code)]))
@@ -439,7 +442,7 @@ fn primitive_type_to_rust(pt: &parser::PrimitiveType) -> &str {
 fn emit_writer_state_transition(
     ws: &CodecState,
     ws_next: &CodecState,
-    env: &fingerprint::Environment,
+    env: &Environment,
 ) -> TokenStream {
     match ws.field {
         Some((ref f, serves_as_dimension)) => {
@@ -756,9 +759,9 @@ fn emit_writer_field_state_transition_array(
         .expect("Arrays should have at least one dimension");
     let pre_field_write = Some(quote! {
         if #item_writer_over_len_check {
-            Err(rust_lcm_codec::EncodeValueError::ArrayLengthMismatch(
+            return Err(rust_lcm_codec::EncodeValueError::ArrayLengthMismatch(
                 "array length mismatch discovered while iterating",
-            ))?;
+            ));
         }
     });
     let post_field_write = Some(quote! {
@@ -864,7 +867,7 @@ impl parser::StructType {
 fn emit_reader_state_transition(
     rs: &CodecState,
     next_state: &CodecState,
-    env: &fingerprint::Environment,
+    env: &Environment,
 ) -> TokenStream {
     match rs.field {
         Some((ref f, field_serves_as_dimension)) => {
@@ -962,9 +965,9 @@ fn emit_reader_state_transition(
                         .expect("Arrays should have at least one dimension");
                     let pre_field_read = quote! {
                         if #item_reader_over_len_check {
-                            Err(rust_lcm_codec::DecodeValueError::ArrayLengthMismatch(
+                            return Err(rust_lcm_codec::DecodeValueError::ArrayLengthMismatch(
                                 "array length mismatch discovered while iterating to read",
-                            ))?;
+                            ));
                         }
                     };
                     let post_field_read = quote!(self.parent.#current_iter_count_field_ident += 1;);
@@ -1073,6 +1076,42 @@ fn emit_reader_state_transition(
             }
         }
         None => quote! {},
+    }
+}
+
+/// Collection of a schema and its peers.
+pub struct Environment {
+    local_schema: parser::Schema,
+    all_schemas: Vec<parser::Schema>,
+}
+
+impl Environment {
+    /// Find a struct in the environment by it's StructType (name + ns)
+    fn resolve_struct_type(&self, st: &parser::StructType) -> Option<&parser::Struct> {
+        match &st.namespace {
+            None => self
+                .local_schema
+                .structs
+                .iter()
+                .find(|curr_st| curr_st.name == st.name),
+            Some(ns) => {
+                for sch in self.all_schemas.iter() {
+                    match &sch.package {
+                        Some(this_ns) => {
+                            if this_ns == ns {
+                                for curr_st in sch.structs.iter() {
+                                    if curr_st.name == st.name {
+                                        return Some(curr_st);
+                                    }
+                                }
+                            }
+                        }
+                        None => (),
+                    }
+                }
+                None
+            }
+        }
     }
 }
 
