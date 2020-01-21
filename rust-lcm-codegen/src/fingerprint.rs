@@ -1,8 +1,10 @@
+//! Utilities related to LCM fingerprinting
 #![allow(dead_code)]
 #![allow(unused_variables)]
 #![allow(unused_imports)]
 
 use crate::parser::{self, Schema};
+use crate::Environment;
 
 // Hashing operations
 
@@ -94,41 +96,6 @@ fn struct_child_struct_types(s: &parser::Struct) -> impl Iterator<Item = parser:
             _ => None,
         },
     })
-}
-
-pub struct Environment {
-    pub local_schema: parser::Schema,
-    pub all_schemas: Vec<parser::Schema>,
-}
-
-impl Environment {
-    /// Find a struct in the environment by it's StructType (name + ns)
-    fn resolve_struct_type(&self, st: &parser::StructType) -> Option<&parser::Struct> {
-        match &st.namespace {
-            None => self
-                .local_schema
-                .structs
-                .iter()
-                .find(|curr_st| curr_st.name == st.name),
-            Some(ns) => {
-                for sch in self.all_schemas.iter() {
-                    match &sch.package {
-                        Some(this_ns) => {
-                            if this_ns == ns {
-                                for curr_st in sch.structs.iter() {
-                                    if curr_st.name == st.name {
-                                        return Some(curr_st);
-                                    }
-                                }
-                            }
-                        }
-                        None => (),
-                    }
-                }
-                None
-            }
-        }
-    }
 }
 
 fn struct_hash_internal(s: &parser::Struct, env: &Environment, mut stack: &mut Vec<u64>) -> u64 {
