@@ -241,5 +241,3 @@ fn byte_slice_read_after_partial_iteration_round_trip() -> Result<(), TestError>
     assert_eq!(n_bytes_written, r.cursor());
     Ok(())
 }
-// TODO - test mixed iteration and byte slicing case for reading!
-// TODO - test mixed FULL iteration and byte slicing case for reading!
