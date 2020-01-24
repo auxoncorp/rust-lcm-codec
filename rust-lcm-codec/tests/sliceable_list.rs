@@ -48,7 +48,7 @@ fn byte_slice_write_round_trip() -> Result<(), TestError> {
         let pw: generated::sliceable_list::blob_t_write_bytes<_> =
             pw.write_nbytes(item_values_to_write.len() as i32)?;
         let _write_done: generated::sliceable_list::blob_t_write_done<_> =
-            pw.copy_bytes_from_slice(&item_values_to_write)?;
+            pw.bytes_copy_from_slice(&item_values_to_write)?;
     }
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
     let pr = generated::sliceable_list::begin_blob_t_read(&mut r)?;
@@ -80,7 +80,7 @@ fn byte_slice_writer_mixed_with_item_iterator_round_trip() -> Result<(), TestErr
         }
         // then use bulk slice operations for the rest of the values
         let _write_done: generated::sliceable_list::blob_t_write_done<_> =
-            pw.copy_bytes_from_slice(&item_values_to_write[3..])?;
+            pw.bytes_copy_from_slice(&item_values_to_write[3..])?;
     }
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
     let pr = generated::sliceable_list::begin_blob_t_read(&mut r)?;
@@ -163,7 +163,7 @@ fn byte_slice_read_round_trip() -> Result<(), TestError> {
         let pw: generated::sliceable_list::blob_t_write_bytes<_> =
             pw.write_nbytes(item_values_to_write.len() as i32)?;
         let _write_done: generated::sliceable_list::blob_t_write_done<_> =
-            pw.copy_bytes_from_slice(&item_values_to_write)?;
+            pw.bytes_copy_from_slice(&item_values_to_write)?;
         w.cursor()
     };
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
@@ -190,7 +190,7 @@ fn byte_slice_read_after_full_iteration_round_trip() -> Result<(), TestError> {
         let pw: generated::sliceable_list::blob_t_write_bytes<_> =
             pw.write_nbytes(item_values_to_write.len() as i32)?;
         let _write_done: generated::sliceable_list::blob_t_write_done<_> =
-            pw.copy_bytes_from_slice(&item_values_to_write)?;
+            pw.bytes_copy_from_slice(&item_values_to_write)?;
         w.cursor()
     };
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
@@ -220,7 +220,7 @@ fn byte_slice_read_after_partial_iteration_round_trip() -> Result<(), TestError>
         let pw: generated::sliceable_list::blob_t_write_bytes<_> =
             pw.write_nbytes(item_values_to_write.len() as i32)?;
         let _write_done: generated::sliceable_list::blob_t_write_done<_> =
-            pw.copy_bytes_from_slice(&item_values_to_write)?;
+            pw.bytes_copy_from_slice(&item_values_to_write)?;
         w.cursor()
     };
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);

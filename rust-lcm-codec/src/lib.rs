@@ -180,10 +180,10 @@ impl<'a> StreamingWriter for BufferWriter<'a> {
             // fashion and the cursor is moved past the immutable region. It helps that we also
             // never mutate the underlying buffer anyhow.
             let s = unsafe {
-                core::mem::transmute(core::slice::from_raw_parts_mut(
+                &mut *(core::slice::from_raw_parts_mut(
                     self.buffer.as_mut_ptr().add(self.cursor),
                     len,
-                ))
+                ) as *mut [u8] as *mut [core::mem::MaybeUninit<u8>])
             };
             self.cursor += len;
             Ok(s)
