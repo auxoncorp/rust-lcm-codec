@@ -75,3 +75,9 @@ for a complete example of how to set up code generation from [LCM schema](rust-l
 
 See [rust-lcm-codec/tests](rust-lcm-codec/tests) for examples of how to use the
 de/serializers exposed by the [generated](rust-lcm-codec/tests/generated) crate.
+
+## Caveats
+
+* Does not yet support multidimensional arrays.
+* Not yet rigorously tested for cross-implementation compatibility
+
