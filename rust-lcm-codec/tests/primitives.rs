@@ -41,7 +41,7 @@ fn not_big_enough_buffer_for_field() {
 #[test]
 fn prim_test_read_direct() -> Result<(), TestError> {
     let mut buf = [0u8; 256];
-    {
+    let n_bytes_written = {
         let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
         let pw = generated::primitives::begin_primitives_t_write(&mut w)?;
         let _write_done: generated::primitives::primitives_t_write_done<_> = pw
@@ -54,7 +54,8 @@ fn prim_test_read_direct() -> Result<(), TestError> {
             .write_string_field("seven")?
             .write_bool_field(true)?
             .write_byte_field(8)?;
-    }
+        w.cursor()
+    };
     let mut r = rust_lcm_codec::BufferReader::new(&mut buf);
     let pr = generated::primitives::begin_primitives_t_read(&mut r)?;
     let (int8_field, pr) = pr.read_int8_field()?;
@@ -76,6 +77,7 @@ fn prim_test_read_direct() -> Result<(), TestError> {
     assert_eq!("seven", string_field);
     assert_eq!(true, bool_field);
     assert_eq!(8, byte_field);
+    assert_eq!(n_bytes_written, r.cursor());
     Ok(())
 }
 
