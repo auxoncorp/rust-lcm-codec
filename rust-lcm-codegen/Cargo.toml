@@ -1,8 +1,10 @@
 [package]
-authors = ["Russell Mull <russell@auxon.io>"]
-edition = "2018"
 name = "rust-lcm-codegen"
-version = "0.1.0"
+version = "0.2.0"
+edition = "2018"
+authors = ["Russell Mull <russell@auxon.io>", "Zack Pierce <zack@auxon.io>"]
+license = "Apache-2.0"
+repository = "https://github.com/auxoncorp/rust-lcm-codec"
 
 [dependencies]
 nom = "5"
