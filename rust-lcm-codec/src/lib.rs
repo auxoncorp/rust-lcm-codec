@@ -76,7 +76,7 @@ impl<'a> StreamingReader for BufferReader<'a> {
     fn share_bytes(&mut self, len: usize) -> Result<&[u8], Self::Error> {
         let end = self.cursor + len;
         if end <= self.buffer.len() {
-            // This is unsafe because we are providing a shared a shareable immutable reference
+            // This is unsafe because we are providing a shared immutable reference
             // to a part of a slice we currently holding a mutable (read: unshareable, solitary)
             // reference to via the lifetime from `&mut self`.
             //
@@ -171,14 +171,13 @@ impl<'a> StreamingWriter for BufferWriter<'a> {
     ) -> Result<&mut [core::mem::MaybeUninit<u8>], Self::Error> {
         let end = self.cursor + len;
         if end <= self.buffer.len() {
-            // This is unsafe because we are providing a shared a shareable immutable reference
-            // to a part of a slice we currently holding a mutable (read: unshareable, solitary)
+            // This is unsafe because we are returning a mutable reference
+            // to a part of a slice we currently holding a (read: unshareable, solitary)
             // reference to via the lifetime from `&mut self`.
             //
             // We know that this type will not in fact be able to mutate the byte slice underneath
-            // that shared immutable reference because the BufferWriter operates solely in a forward
-            // fashion and the cursor is moved past the immutable region. It helps that we also
-            // never mutate the underlying buffer anyhow.
+            // that returned region because the BufferWriter operates solely in a forward
+            // fashion and the cursor is moved past the returned region.
             let s = unsafe {
                 &mut *(core::slice::from_raw_parts_mut(
                     self.buffer.as_mut_ptr().add(self.cursor),
