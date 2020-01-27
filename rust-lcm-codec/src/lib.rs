@@ -2,63 +2,8 @@
 #![no_std]
 #![deny(warnings)]
 #![deny(missing_docs)]
-
-/// The errors that can occur when decoding the LCM type hash / fingerprint
-/// for a message.
-#[derive(Debug)]
-pub enum DecodeFingerprintError<E> {
-    /// The fingerprint value found did not match the expected value for the
-    /// message type of interest.
-    InvalidFingerprint(u64),
-    /// The underlying StreamingReader encountered an error.
-    ReaderError(E),
-}
-
-impl<E> From<E> for DecodeFingerprintError<E> {
-    fn from(e: E) -> Self {
-        DecodeFingerprintError::ReaderError(e)
-    }
-}
-
-/// The errors that can occur when decoding a value in the body
-/// of an LCM message.
-#[derive(Debug)]
-pub enum DecodeValueError<E> {
-    /// The user attempted to read more or fewer items
-    /// out of an array than the array contained.
-    ArrayLengthMismatch(&'static str),
-    /// The value attempted to be decoded was invalid
-    /// in some way.
-    InvalidValue(&'static str),
-    /// The underlying StreamingReader encountered an error.
-    ReaderError(E),
-}
-
-impl<E> From<E> for DecodeValueError<E> {
-    fn from(e: E) -> Self {
-        DecodeValueError::ReaderError(e)
-    }
-}
-
-/// The errors that can occur when encoding a value in the body
-/// of an LCM message.
-#[derive(Debug, PartialEq, Eq)]
-pub enum EncodeValueError<E> {
-    /// The user attempted to write more or fewer items
-    /// into an array than the array contained.
-    ArrayLengthMismatch(&'static str),
-    /// The value attempted to be encoded was invalid
-    /// in some way.
-    InvalidValue(&'static str),
-    /// The underlying StreamingWriter encountered an error.
-    WriterError(E),
-}
-
-impl<E> From<E> for EncodeValueError<E> {
-    fn from(e: E) -> Self {
-        EncodeValueError::WriterError(e)
-    }
-}
+mod error;
+pub use error::*;
 
 /// Reader backend trait
 pub trait StreamingReader {

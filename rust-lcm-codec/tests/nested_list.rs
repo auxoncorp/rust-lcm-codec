@@ -1,42 +1,10 @@
 extern crate generated;
 extern crate rust_lcm_codec;
 
-use rust_lcm_codec::BufferWriterError;
-
-#[derive(Debug)]
-enum TestError {
-    BufferWriterError(rust_lcm_codec::BufferWriterError),
-    DecodeFingerprintError(
-        rust_lcm_codec::DecodeFingerprintError<rust_lcm_codec::BufferReaderError>,
-    ),
-    DecodeValueError(rust_lcm_codec::DecodeValueError<rust_lcm_codec::BufferReaderError>),
-    EncodeValueError(rust_lcm_codec::EncodeValueError<rust_lcm_codec::BufferWriterError>),
-}
-
-impl From<rust_lcm_codec::BufferWriterError> for TestError {
-    fn from(e: BufferWriterError) -> Self {
-        TestError::BufferWriterError(e)
-    }
-}
-
-impl From<rust_lcm_codec::DecodeFingerprintError<rust_lcm_codec::BufferReaderError>> for TestError {
-    fn from(e: rust_lcm_codec::DecodeFingerprintError<rust_lcm_codec::BufferReaderError>) -> Self {
-        TestError::DecodeFingerprintError(e)
-    }
-}
-
-impl From<rust_lcm_codec::DecodeValueError<rust_lcm_codec::BufferReaderError>> for TestError {
-    fn from(e: rust_lcm_codec::DecodeValueError<rust_lcm_codec::BufferReaderError>) -> Self {
-        TestError::DecodeValueError(e)
-    }
-}
-
-impl From<rust_lcm_codec::EncodeValueError<rust_lcm_codec::BufferWriterError>> for TestError {
-    fn from(e: rust_lcm_codec::EncodeValueError<rust_lcm_codec::BufferWriterError>) -> Self {
-        TestError::EncodeValueError(e)
-    }
-}
-
+type TestError = rust_lcm_codec::CodecError<
+    rust_lcm_codec::BufferReaderError,
+    rust_lcm_codec::BufferWriterError,
+>;
 #[test]
 fn nested_list_round_trip_happy_path() -> Result<(), TestError> {
     #[derive(Default, Debug, PartialEq)]

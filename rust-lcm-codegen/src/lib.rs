@@ -228,7 +228,7 @@ fn emit_struct(s: &parser::Struct, env: &Environment) -> TokenStream {
 
             #[inline(always)]
             pub fn #begin_write<W: rust_lcm_codec::StreamingWriter>(writer: &'_ mut W)
-                    -> Result<#write_ready_type<'_, W>, W::Error> {
+                    -> Result<#write_ready_type<'_, W>, rust_lcm_codec::EncodeFingerprintError<W::Error>> {
                 writer.write_bytes(&#schema_hash.to_be_bytes())?;
 
                 Ok(#write_ready_type {
@@ -555,7 +555,7 @@ fn emit_writer_field_state_transition_primitive(
         let current_iter_count_initialization =
             emit_next_field_current_iter_count_initialization(next_state);
         quote! {
-            pub fn #write_method_ident(self, val: #maybe_ref #rust_field_type) -> Result<#next_type<'a, W>, W::Error> {
+            pub fn #write_method_ident(self, val: #maybe_ref #rust_field_type) -> Result<#next_type<'a, W>, rust_lcm_codec::EncodeValueError<W::Error>> {
                 #write_invocation
                 Ok(#next_type {
                     writer: self.writer,

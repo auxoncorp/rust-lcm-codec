@@ -3,39 +3,20 @@ extern crate rust_lcm_codec;
 
 use rust_lcm_codec::BufferWriterError;
 
-#[derive(Debug)]
-enum TestError {
-    BufferWriterError(rust_lcm_codec::BufferWriterError),
-    DecodeFingerprintError(
-        rust_lcm_codec::DecodeFingerprintError<rust_lcm_codec::BufferReaderError>,
-    ),
-    DecodeValueError(rust_lcm_codec::DecodeValueError<rust_lcm_codec::BufferReaderError>),
-}
-
-impl From<rust_lcm_codec::BufferWriterError> for TestError {
-    fn from(e: BufferWriterError) -> Self {
-        TestError::BufferWriterError(e)
-    }
-}
-
-impl From<rust_lcm_codec::DecodeFingerprintError<rust_lcm_codec::BufferReaderError>> for TestError {
-    fn from(e: rust_lcm_codec::DecodeFingerprintError<rust_lcm_codec::BufferReaderError>) -> Self {
-        TestError::DecodeFingerprintError(e)
-    }
-}
-
-impl From<rust_lcm_codec::DecodeValueError<rust_lcm_codec::BufferReaderError>> for TestError {
-    fn from(e: rust_lcm_codec::DecodeValueError<rust_lcm_codec::BufferReaderError>) -> Self {
-        TestError::DecodeValueError(e)
-    }
-}
+type TestError = rust_lcm_codec::CodecError<
+    rust_lcm_codec::BufferReaderError,
+    rust_lcm_codec::BufferWriterError,
+>;
 
 #[test]
 fn not_big_enough_buffer_for_fingerprint() {
     let mut buf = [0u8; 7];
     let mut w = rust_lcm_codec::BufferWriter::new(&mut buf);
     if let Err(e) = generated::primitives::begin_primitives_t_write(&mut w) {
-        assert_eq!(BufferWriterError, e);
+        assert_eq!(
+            rust_lcm_codec::EncodeFingerprintError::WriterError(BufferWriterError),
+            e
+        );
     } else {
         panic!("Expected an error, dagnabit");
     }
@@ -48,7 +29,10 @@ fn not_big_enough_buffer_for_field() {
     let w = generated::primitives::begin_primitives_t_write(&mut buffer_writer)
         .expect("Enough space for fingerprint");
     if let Err(e) = w.write_int8_field(1) {
-        assert_eq!(BufferWriterError, e);
+        assert_eq!(
+            rust_lcm_codec::EncodeValueError::WriterError(BufferWriterError),
+            e
+        );
     } else {
         panic!("Expected an error");
     }
