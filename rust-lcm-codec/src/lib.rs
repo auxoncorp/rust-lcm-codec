@@ -37,17 +37,20 @@ pub struct BufferReader<'a> {
 
 impl<'a> BufferReader<'a> {
     /// Make a new BufferReader around a byte slice
+    #[inline]
     pub fn new(buffer: &'a [u8]) -> BufferReader<'a> {
         BufferReader { buffer, cursor: 0 }
     }
 
     /// How many bytes have been read thus far
+    #[inline]
     pub fn cursor(&self) -> usize {
         self.cursor
     }
 }
 
 impl<'a> From<&'a [u8]> for BufferReader<'a> {
+    #[inline]
     fn from(buffer: &'a [u8]) -> Self {
         BufferReader::new(buffer)
     }
@@ -56,6 +59,7 @@ impl<'a> From<&'a [u8]> for BufferReader<'a> {
 impl<'a> StreamingReader for BufferReader<'a> {
     type Error = BufferReaderError;
 
+    #[inline]
     fn read_bytes(&mut self, buf: &mut [u8]) -> Result<(), Self::Error> {
         let len = buf.len();
         let end = self.cursor + len;
@@ -68,15 +72,16 @@ impl<'a> StreamingReader for BufferReader<'a> {
         }
     }
 
+    #[inline]
     fn share_bytes(&mut self, len: usize) -> Result<&[u8], Self::Error> {
         let end = self.cursor + len;
         if end <= self.buffer.len() {
-            // This is unsafe because we are providing a shared a shareable immutable reference
+            // This is unsafe because we are providing a shared immutable reference
             // to a part of a slice we currently holding a mutable (read: unshareable, solitary)
             // reference to via the lifetime from `&mut self`.
             //
             // We know that this type will not in fact be able to mutate the byte slice underneath
-            // that shared immutable reference because the BufferRead operates solely in a forward
+            // that shared immutable reference because the BufferReader operates solely in a forward
             // fashion and the cursor is moved past the immutable region. It helps that we also
             // never mutate the underlying buffer anyhow.
             let s =
@@ -103,6 +108,17 @@ pub trait StreamingWriter {
     /// to the implementing type.
     fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
 
+    /// Expose an aliased view of a subset of the underlying data as
+    /// mutable bytes.
+    ///
+    /// The implementer must ensure that the view of bytes returned
+    /// does not overlap with the region of bytes that the StreamingWriter
+    /// allows itself to mutate at any further point.
+    fn share_bytes_mut(
+        &mut self,
+        len: usize,
+    ) -> Result<&mut [core::mem::MaybeUninit<u8>], Self::Error>;
+
     /// Ensure that all bytes are fully written in a maximally durable fashion.
     fn flush() -> Result<(), Self::Error>;
 }
@@ -121,11 +137,13 @@ pub struct BufferWriter<'a> {
 
 impl<'a> BufferWriter<'a> {
     /// Create a new BufferWriter
+    #[inline]
     pub fn new(buffer: &'a mut [u8]) -> BufferWriter<'a> {
         BufferWriter { buffer, cursor: 0 }
     }
 
     /// How many bytes have been written thus far
+    #[inline]
     pub fn cursor(&self) -> usize {
         self.cursor
     }
@@ -134,7 +152,7 @@ impl<'a> BufferWriter<'a> {
 impl<'a> StreamingWriter for BufferWriter<'a> {
     type Error = BufferWriterError;
 
-    #[inline(always)]
+    #[inline]
     fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
         let len = bytes.len();
         let end = self.cursor + len;
@@ -146,8 +164,34 @@ impl<'a> StreamingWriter for BufferWriter<'a> {
             Err(BufferWriterError)
         }
     }
+    #[inline]
+    fn share_bytes_mut(
+        &mut self,
+        len: usize,
+    ) -> Result<&mut [core::mem::MaybeUninit<u8>], Self::Error> {
+        let end = self.cursor + len;
+        if end <= self.buffer.len() {
+            // This is unsafe because we are returning a mutable reference
+            // to a part of a slice we currently holding a (read: unshareable, solitary)
+            // reference to via the lifetime from `&mut self`.
+            //
+            // We know that this type will not in fact be able to mutate the byte slice underneath
+            // that returned region because the BufferWriter operates solely in a forward
+            // fashion and the cursor is moved past the returned region.
+            let s = unsafe {
+                &mut *(core::slice::from_raw_parts_mut(
+                    self.buffer.as_mut_ptr().add(self.cursor),
+                    len,
+                ) as *mut [u8] as *mut [core::mem::MaybeUninit<u8>])
+            };
+            self.cursor += len;
+            Ok(s)
+        } else {
+            Err(BufferWriterError)
+        }
+    }
 
-    #[inline(always)]
+    #[inline]
     fn flush() -> Result<(), Self::Error> {
         Ok(())
     }
@@ -166,7 +210,7 @@ pub trait SerializeValue: Sized {
 macro_rules! primitive_serialize_impl {
     ($ty:ty) => {
         impl SerializeValue for $ty {
-            #[inline(always)]
+            #[inline]
             fn read_value<R: StreamingReader>(
                 reader: &mut R,
             ) -> Result<Self, DecodeValueError<R::Error>> {
@@ -175,7 +219,7 @@ macro_rules! primitive_serialize_impl {
                 Ok(Self::from_be_bytes(bytes))
             }
 
-            #[inline(always)]
+            #[inline]
             fn write_value<W: StreamingWriter>(val: Self, writer: &mut W) -> Result<(), W::Error> {
                 writer.write_bytes(&val.to_be_bytes())
             }
@@ -192,6 +236,7 @@ primitive_serialize_impl!(f64);
 primitive_serialize_impl!(u8);
 
 /// Write a string to a StreamingWriter using LCM's convention of encoding strings.
+#[inline]
 pub fn write_str_value<W: StreamingWriter>(string: &str, writer: &mut W) -> Result<(), W::Error> {
     writer.write_bytes(&(&(string.len() as i32 + 1)).to_be_bytes())?;
     writer.write_bytes(&string.as_bytes())?;
@@ -199,6 +244,7 @@ pub fn write_str_value<W: StreamingWriter>(string: &str, writer: &mut W) -> Resu
 }
 
 /// Read a view of a string from a StreamingReader using LCM's convention of encoding strings.
+#[inline]
 pub fn read_str_value<R: StreamingReader>(
     reader: &mut R,
 ) -> Result<&str, DecodeValueError<<R as StreamingReader>::Error>> {
@@ -217,6 +263,7 @@ pub fn read_str_value<R: StreamingReader>(
 }
 
 impl SerializeValue for bool {
+    #[inline]
     fn read_value<R: StreamingReader>(
         reader: &mut R,
     ) -> Result<Self, DecodeValueError<<R as StreamingReader>::Error>> {
@@ -229,6 +276,7 @@ impl SerializeValue for bool {
         }
     }
 
+    #[inline]
     fn write_value<W: StreamingWriter>(val: Self, writer: &mut W) -> Result<(), W::Error> {
         SerializeValue::write_value(if val { 1i8 } else { 0i8 }, writer)
     }

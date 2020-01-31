@@ -226,7 +226,7 @@ fn emit_struct(s: &parser::Struct, env: &Environment) -> TokenStream {
     quote! {
         pub const #schema_hash_ident : u64 = #schema_hash;
 
-            #[inline(always)]
+            #[inline]
             pub fn #begin_write<W: rust_lcm_codec::StreamingWriter>(writer: &'_ mut W)
                     -> Result<#write_ready_type<'_, W>, rust_lcm_codec::EncodeFingerprintError<W::Error>> {
                 writer.write_bytes(&#schema_hash.to_be_bytes())?;
@@ -235,7 +235,7 @@ fn emit_struct(s: &parser::Struct, env: &Environment) -> TokenStream {
                     writer
                 })
             }
-            #[inline(always)]
+            #[inline]
             pub fn #begin_read<R: rust_lcm_codec::StreamingReader>(reader: &'_ mut R)
                     -> Result<#read_ready_type<'_, R>, rust_lcm_codec::DecodeFingerprintError<R::Error>> {
                 let mut hash_buffer = 0u64.to_ne_bytes();
@@ -555,6 +555,7 @@ fn emit_writer_field_state_transition_primitive(
         let current_iter_count_initialization =
             emit_next_field_current_iter_count_initialization(next_state);
         quote! {
+            #[inline]
             pub fn #write_method_ident(self, val: #maybe_ref #rust_field_type) -> Result<#next_type<'a, W>, rust_lcm_codec::EncodeValueError<W::Error>> {
                 #write_invocation
                 Ok(#next_type {
@@ -569,7 +570,7 @@ fn emit_writer_field_state_transition_primitive(
 
     quote! {
         impl<'a, W: rust_lcm_codec::StreamingWriter> #start_type<'a, W> {
-            #[inline(always)]
+            #[inline]
             #write_method
         }
     }
@@ -596,6 +597,7 @@ fn emit_write_struct_method(
     };
     let writer_path_tokens = writer_path.path();
     quote! {
+        #[inline]
         pub fn #write_method_ident<F>(self, f: F) -> Result<#after_field_type, rust_lcm_codec::EncodeValueError<W::Error>>
             where F: FnOnce(#struct_ns_prefix#field_struct_write_ready<'a, W>)
                 -> Result<#struct_ns_prefix#field_struct_write_done<'a, W>, rust_lcm_codec::EncodeValueError<W::Error>>
@@ -644,7 +646,7 @@ fn emit_writer_field_state_transition_struct(
     );
     quote! {
         impl<'a, W: rust_lcm_codec::StreamingWriter> #start_type<'a, W> {
-            #[inline(always)]
+            #[inline]
             #write_method
         }
     }
@@ -696,6 +698,20 @@ impl ArrayType {
                  }| quote!(#current_count < #expected_count ),
             )
     }
+    fn array_current_count_remainder_value(
+        &self,
+        array_field_name: &str,
+        index: usize,
+        use_parent: bool,
+    ) -> Option<TokenStream> {
+        self.array_current_count_vs_expected(array_field_name, index, use_parent)
+            .map(
+                |CountComparisonParts {
+                     current_count,
+                     expected_count,
+                 }| quote!(#expected_count - #current_count),
+            )
+    }
 
     fn array_current_count_vs_expected(
         &self,
@@ -739,6 +755,9 @@ struct CountComparisonParts {
 ///
 /// After the Iterator has been exhausted, the user is expected to
 /// call `done` on this state instance to consume it and move on.
+///
+/// If the array is over bytes, provide alternatives to iterating
+/// which allow direct slice operations.
 fn emit_writer_field_state_transition_array(
     start_type: Ident,
     next_state: &CodecState,
@@ -777,6 +796,7 @@ fn emit_writer_field_state_transition_array(
             let rust_field_type = Some(format_ident!("{}", primitive_type_to_rust(&pt)));
             let write_invocation = emit_write_primitive_invocation(*pt, WriterPath::ViaSelfParent);
             quote! {
+                #[inline]
                 pub fn #write_item_method_ident(self, val: #maybe_ref #rust_field_type) -> Result<(), rust_lcm_codec::EncodeValueError<W::Error>> {
                     #pre_field_write
                     #write_invocation
@@ -806,6 +826,63 @@ fn emit_writer_field_state_transition_array(
     let top_level_under_len_check = at
         .array_current_count_under_expected_check(field_name, 0, false)
         .expect("Arrays should have at least one dimension");
+
+    let (maybe_slice_writer_methods, maybe_slice_writer_outcome_definition) = match &*at.item_type {
+        Type::Primitive(PrimitiveType::Byte) => {
+            let remainder_value = at.array_current_count_remainder_value(field_name, 0, false);
+            let copy_field_from_slice_ident = format_ident!("{}_copy_from_slice", field_name);
+            let get_field_as_mut_slice_ident = format_ident!("{}_as_mut_slice", field_name);
+            let slice_writer_outcome_type_ident = format_ident!("{}AsMutSliceOutcome", field_name);
+            let slice_writer_outcome_type_definition = quote! {
+                type #slice_writer_outcome_type_ident<'a, W> = (&'a mut [core::mem::MaybeUninit<u8>], #next_type<'a, W>);
+            };
+            (
+                Some(quote! {
+                #[inline]
+                pub fn #copy_field_from_slice_ident(self, val: &[u8]) -> Result<#next_type<'a, W>, rust_lcm_codec::EncodeValueError<W::Error>> {
+                    if #remainder_value != val.len() {
+                        Err(rust_lcm_codec::EncodeValueError::ArrayLengthMismatch(
+                            "slice provided to copy_FIELD_from_slice had a length which did not match the remaining expected size of the array",
+                        ))
+                    } else {
+                        self.writer.write_bytes(val)?;
+                        Ok(#next_type {
+                            writer: self.writer,
+                            #current_iter_count_initialization
+                            #( #next_dimensions_fields )*
+                        })
+                    }
+                }
+                /// This method exposes the underlying writer's raw bytes for a region of size equal
+                /// to the previously-written array length field value (minus any values already written
+                /// via iteration).  This provides a mechanism
+                /// for doing direct operations into byte blob style fields without extraneous copies,
+                ///
+                /// Since we don't know anything about the underlying writer's bytes preceding content,
+                /// return the bytes with a type hint showing they may be uninitialized.
+                /// In implementations where the writer's backing storage mechanism is understood by the
+                /// user (e.g. backed by a previously initialized array buffer), it may be safe to
+                /// transmute the slice to a plain byte slice.
+                #[inline]
+                pub fn #get_field_as_mut_slice_ident(self) -> Result<#slice_writer_outcome_type_ident<'a, W>, rust_lcm_codec::EncodeValueError<W::Error>> {
+                        // Use transmute to help link the generated bytes reference to the underlying Writer's lifetime
+                        //
+                        // Here we depend on the documented invariant of share_bytes_mut wherein the Writer
+                        // promises not to allow itself to mutate the shared bytes at any point in the future.
+                        let shared_bytes = unsafe { core::mem::transmute(self.writer.share_bytes_mut(#remainder_value)?) };
+                        Ok((shared_bytes,
+                            #next_type {
+                                writer: self.writer,
+                                #current_iter_count_initialization
+                                #( #next_dimensions_fields )*
+                            }))
+                }
+                }),
+                Some(slice_writer_outcome_type_definition),
+            )
+        }
+        _ => (None, None),
+    };
     // TODO - create location-specific error message for array length mismatch
     quote! {
 
@@ -831,11 +908,17 @@ fn emit_writer_field_state_transition_array(
             }
         }
         impl<'a, W: rust_lcm_codec::StreamingWriter> #item_writer_struct_ident<'a, W> {
-            #[inline(always)]
+            #[inline]
             #write_item_method
         }
+
+        #maybe_slice_writer_outcome_definition
+
         impl<'a, W: rust_lcm_codec::StreamingWriter> #start_type<'a, W> {
-            #[inline(always)]
+
+            #maybe_slice_writer_methods
+
+            #[inline]
             pub fn done(self) -> Result<#next_type<'a, W>, rust_lcm_codec::EncodeValueError<W::Error>> {
                 if #top_level_under_len_check {
                     Err(rust_lcm_codec::EncodeValueError::ArrayLengthMismatch(
@@ -924,7 +1007,7 @@ fn emit_reader_state_transition(
                     quote! {
                         impl<'a, R: rust_lcm_codec::StreamingReader> #start_type<'a, R> {
 
-                            #[inline(always)]
+                            #[inline]
                             #read_methods
                         }
                     }
@@ -938,7 +1021,7 @@ fn emit_reader_state_transition(
                     quote! {
                         impl<'a, R: rust_lcm_codec::StreamingReader> #start_type<'a, R> {
 
-                            #[inline(always)]
+                            #[inline]
                             pub fn #read_method_ident<F>(self, f: F) -> Result<#next_type<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>>
                                 where F: FnOnce(#struct_ns_prefix#field_struct_read_ready<'a, R>) -> Result<#struct_ns_prefix#field_struct_read_done<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>>
                             {
@@ -1008,7 +1091,6 @@ fn emit_reader_state_transition(
                                     &StateName::Done,
                                 );
                             quote! {
-                                #[inline(always)]
                                 pub fn #read_method_ident<F>(self, f: F) -> Result<(), rust_lcm_codec::DecodeValueError<R::Error>>
                                     where F: FnOnce(#struct_ns_prefix#field_struct_read_ready<'a, R>) -> Result<#struct_ns_prefix#field_struct_read_done<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>>
                                 {
@@ -1029,6 +1111,45 @@ fn emit_reader_state_transition(
                     let top_level_under_len_check = at
                         .array_current_count_under_expected_check(f.name.as_str(), 0, false)
                         .expect("Arrays should have at least one dimension");
+                    let (maybe_slice_reader_method, maybe_slice_reader_outcome_type) = match &*at
+                        .item_type
+                    {
+                        Type::Primitive(PrimitiveType::Byte) => {
+                            let field_name = f.name.as_str();
+                            let remainder_value =
+                                at.array_current_count_remainder_value(field_name, 0, false);
+                            let get_field_as_slice_ident = format_ident!("{}_as_slice", field_name);
+                            let slice_reader_outcome_type_ident =
+                                format_ident!("{}AsSliceOutcome", field_name);
+                            let slice_reader_outcome_type_definition = quote! {
+                                type #slice_reader_outcome_type_ident<'a, R> = (&'a [u8], #next_type<'a, R>);
+                            };
+                            (
+                                Some(quote! {
+                                /// This method exposes the underlying reader's raw bytes for a region of size equal
+                                /// to the previously-written array length field value (minus any values
+                                /// previously read through iteration).  This provides a mechanism
+                                /// for doing direct operations from byte blob style fields without extraneous copies,
+                                #[inline]
+                                pub fn #get_field_as_slice_ident(self) -> Result<#slice_reader_outcome_type_ident<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>> {
+                                        // Use transmute to help link the generated bytes reference to the underlying Reader's lifetime
+                                        //
+                                        // Here we depend on the documented invariant of share_bytes wherein the Reader
+                                        // promises not to allow itself to mutate the shared bytes at any point in the future.
+                                        let shared_bytes = unsafe { core::mem::transmute(self.reader.share_bytes(#remainder_value)?) };
+                                        Ok((shared_bytes,
+                                            #next_type {
+                                                reader: self.reader,
+                                                #current_iter_count_initialization
+                                                #( #next_dimensions_fields )*
+                                            }))
+                                }
+                                }),
+                                Some(slice_reader_outcome_type_definition),
+                            )
+                        }
+                        _ => (None, None),
+                    };
                     quote! {
                         impl<'a, R: rust_lcm_codec::StreamingReader> Iterator for #start_type<'a, R> {
                             type Item = #item_reader_struct_ident<'a, R>;
@@ -1052,11 +1173,14 @@ fn emit_reader_state_transition(
                             }
                         }
                         impl<'a, R: rust_lcm_codec::StreamingReader> #item_reader_struct_ident<'a, R> {
-                            #[inline(always)]
+                            #[inline]
                             #read_item_method
                         }
+
+                        #maybe_slice_reader_outcome_type
+
                         impl<'a, R: rust_lcm_codec::StreamingReader> #start_type<'a, R> {
-                            #[inline(always)]
+                            #[inline]
                             pub fn done(self) -> Result<#next_type<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>> {
                                 if #top_level_under_len_check {
                                     Err(rust_lcm_codec::DecodeValueError::ArrayLengthMismatch(
@@ -1070,6 +1194,8 @@ fn emit_reader_state_transition(
                                     })
                                 }
                             }
+
+                            #maybe_slice_reader_method
                         }
                     }
                 }
