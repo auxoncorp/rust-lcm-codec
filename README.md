@@ -1,4 +1,4 @@
-# rust-lcm-code*
+# rust-lcm-codec
 
 Rust support for reading and writing the [LCM data format](https://lcm-proj.github.io/).
 
