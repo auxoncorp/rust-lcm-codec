@@ -4,12 +4,12 @@ Rust support for reading and writing the [LCM data format](https://lcm-proj.gith
 
 ## Overview
 
-[rust-lcm-codegen](rust-lcm-codegen) generates de/serialization Rust code from [LCM type specification](https://lcm-proj.github.io/type_specification.html)
-files. It is intended to be usable from a Cargo build.rs script.
-
-[rust-lcm-codec](rust-lcm-codec) contains the runtime library that is used by the generated code
+`rust-lcm-codec` contains the runtime library that is used by the generated code
 to accomplish common de/serialization tasks.
 
+[rust-lcm-codegen](rust-lcm-codegen) generates de/serialization Rust code from
+[LCM type specification](https://lcm-proj.github.io/type_specification.html) files.
+It is intended to be usable from a Cargo build.rs script.
 
 ## Goals
 
@@ -22,7 +22,7 @@ to accomplish common de/serialization tasks.
   * Use session types to enforce valid ordering of de/serialization actions
   * Compatible with other implementations of LCM
 * Generated code should produce no rustc or clippy warnings.
-  
+
 ## Examples
 
 ### Inline Example
@@ -70,11 +70,11 @@ include!(concat!(env!("OUT_DIR"), "/generated_lcm.rs"));
 
 ### More Examples
 
-See also the tiny crate in [rust-lcm-codec/tests/generated](rust-lcm-codec/tests/generated)
-for a complete example of how to set up code generation from [LCM schema](rust-lcm-codec/tests/schemas).
+See also the tiny crate in [tests/generated](tests/generated)
+for a complete example of how to set up code generation from [LCM schema](tests/schemas).
 
-See [rust-lcm-codec/tests](rust-lcm-codec/tests) for examples of how to use the
-de/serializers exposed by the [generated](rust-lcm-codec/tests/generated) crate.
+See [tests](tests) for examples of how to use the
+de/serializers exposed by the [generated](tests/generated) crate.
 
 ## Caveats
 
