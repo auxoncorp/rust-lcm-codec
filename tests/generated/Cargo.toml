@@ -1,12 +1,17 @@
 [package]
-name = "rust-lcm-codec"
+name = "generated"
 version = "0.2.0"
 edition = "2018"
 authors = ["Russell Mull <russell@auxon.io>", "Zack Pierce <zack@auxon.io>"]
 license = "Apache-2.0"
 repository = "https://github.com/auxoncorp/rust-lcm-codec"
 
-[dependencies]
+[lib]
+name = "generated"
+path = "lib.rs"
 
-[dev-dependencies]
-generated = { path = "tests/generated" }
+[dependencies]
+rust-lcm-codec = { path = "../../" }
+
+[build-dependencies]
+rust-lcm-codegen = { path = "../../rust-lcm-codegen" }
