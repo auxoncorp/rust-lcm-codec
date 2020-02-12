@@ -94,7 +94,7 @@ The file referenced at the end of the list will be the most recent one generated
 
 See [tests](tests) for more examples of how to use the
 de/serializers exposed by the [generated](tests/generated) crate for the example
-[schemas](schemas) included with this project.
+[schemas](tests/schemas) included with this project.
 
 ## Tests
 
