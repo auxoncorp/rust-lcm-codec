@@ -6,6 +6,7 @@ authors = ["Russell Mull <russell@auxon.io>", "Zack Pierce <zack@auxon.io>"]
 license = "Apache-2.0"
 repository = "https://github.com/auxoncorp/rust-lcm-codec"
 readme = "README.md"
+description = "Generates Rust de/serialization code from LCM type specification"
 
 [dependencies]
 nom = "5"
