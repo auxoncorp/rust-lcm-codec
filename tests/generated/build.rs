@@ -18,7 +18,7 @@ fn main() {
         "../schemas/sliceable_list.lcm",
     ];
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR");
-    let out_path = Path::join(Path::new(&out_dir), "lcm.rs");
+    let out_path = Path::join(Path::new(&out_dir), "generated_lcm_api.rs");
 
     generate(schema_files, &out_path);
 
