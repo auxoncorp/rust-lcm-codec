@@ -1022,18 +1022,18 @@ fn emit_reader_state_transition(
                         impl<'a, R: rust_lcm_codec::StreamingReader> #start_type<'a, R> {
 
                             #[inline]
-                            pub fn #read_method_ident<F>(self, f: F) -> Result<#next_type<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>>
-                                where F: FnOnce(#struct_ns_prefix#field_struct_read_ready<'a, R>) -> Result<#struct_ns_prefix#field_struct_read_done<'a, R>, rust_lcm_codec::DecodeValueError<R::Error>>
+                            pub fn #read_method_ident<T, F>(self, mut f: F) -> Result<(T, #next_type<'a, R>), rust_lcm_codec::DecodeValueError<R::Error>>
+                                where F: FnMut(#struct_ns_prefix#field_struct_read_ready<'a, R>) -> Result<(T, #struct_ns_prefix#field_struct_read_done<'a, R>), rust_lcm_codec::DecodeValueError<R::Error>>
                             {
                                 let ready = #struct_ns_prefix#field_struct_read_ready {
                                     reader: self.reader,
                                 };
-                                let done = f(ready)?;
-                                Ok(#next_type {
+                                let (out, done) = f(ready)?;
+                                Ok((out, #next_type {
                                     reader: done.reader,
                                     #current_iter_count_initialization
                                     #( #next_dimensions_fields )*
-                                })
+                                }))
                             }
                         }
                     }
