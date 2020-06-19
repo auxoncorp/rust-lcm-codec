@@ -1,6 +1,6 @@
 [package]
 name = "rust-lcm-codegen"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2018"
 authors = ["Russell Mull <russell@auxon.io>", "Zack Pierce <zack@auxon.io>"]
 license = "Apache-2.0"
@@ -9,6 +9,6 @@ readme = "README.md"
 description = "Generates Rust de/serialization code from LCM type specification"
 
 [dependencies]
-nom = "5"
+nom = { version = "5", default-features = false, features = ["std"] }
 quote = "1.0"
 proc-macro2 = "1.0"
